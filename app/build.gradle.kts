@@ -33,6 +33,8 @@ android {
     }
     buildFeatures {
         compose = true
+        // Para BuildConfig.DEBUG: el menú de simulación solo aparece en builds de debug
+        buildConfig = true
     }
 }
 
@@ -45,6 +47,12 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    // Actividad 2: collectAsStateWithLifecycle, viewModel() y Navigation Compose
+    implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.navigation.compose)
+    // Íconos básicos (Add, ArrowBack, MoreVert...) para TopAppBar y FAB
+    implementation(libs.androidx.compose.material.icons.core)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
