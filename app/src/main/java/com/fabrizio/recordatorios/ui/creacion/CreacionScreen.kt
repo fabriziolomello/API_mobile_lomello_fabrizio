@@ -38,7 +38,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.fabrizio.recordatorios.model.Categoria
 import com.fabrizio.recordatorios.model.Prioridad
 import com.fabrizio.recordatorios.model.ValidacionRecordatorio
+import com.fabrizio.recordatorios.ui.components.CampoFecha
 import com.fabrizio.recordatorios.ui.components.CampoTexto
+import com.fabrizio.recordatorios.ui.components.IndicadorCarga
 import com.fabrizio.recordatorios.ui.components.MensajeError
 import com.fabrizio.recordatorios.ui.components.SelectorOpciones
 import com.fabrizio.recordatorios.ui.theme.RecordatoriosTheme
@@ -67,6 +69,7 @@ fun CreacionScreen(
         onDescripcionChange = viewModel::onDescripcionChange,
         onCategoriaSeleccionada = viewModel::onCategoriaSeleccionada,
         onPrioridadSeleccionada = viewModel::onPrioridadSeleccionada,
+        onFechaLimiteSeleccionada = viewModel::onFechaLimiteSeleccionada,
         onGuardar = viewModel::onGuardar,
         onCancelar = onCancelar,
         modifier = modifier
@@ -81,18 +84,19 @@ fun CreacionContenido(
     onDescripcionChange: (String) -> Unit,
     onCategoriaSeleccionada: (Categoria) -> Unit,
     onPrioridadSeleccionada: (Prioridad) -> Unit,
+    onFechaLimiteSeleccionada: (Long?) -> Unit,
     onGuardar: () -> Unit,
     onCancelar: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Mientras se guarda, los campos quedan deshabilitados
-    val habilitado = !uiState.enviando
+    // Mientras se guarda (o se cargan los datos a editar), los campos quedan deshabilitados
+    val habilitado = !uiState.enviando && !uiState.cargando
 
     Scaffold(
         modifier = modifier,
         topBar = {
             TopAppBar(
-                title = { Text("Nuevo recordatorio") },
+                title = { Text(if (uiState.modoEdicion) "Editar recordatorio" else "Nuevo recordatorio") },
                 navigationIcon = {
                     IconButton(onClick = onCancelar) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Cancelar y volver")
@@ -101,81 +105,117 @@ fun CreacionContenido(
             )
         }
     ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .padding(innerPadding)
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+        if (uiState.cargando) {
+            IndicadorCarga(mensaje = "Cargando recordatorio…", modifier = Modifier.padding(innerPadding))
+        } else {
+            FormularioRecordatorio(
+                uiState = uiState,
+                habilitado = habilitado,
+                onTituloChange = onTituloChange,
+                onDescripcionChange = onDescripcionChange,
+                onCategoriaSeleccionada = onCategoriaSeleccionada,
+                onPrioridadSeleccionada = onPrioridadSeleccionada,
+                onFechaLimiteSeleccionada = onFechaLimiteSeleccionada,
+                onGuardar = onGuardar,
+                onCancelar = onCancelar,
+                modifier = Modifier.padding(innerPadding)
+            )
+        }
+    }
+}
+
+@Composable
+private fun FormularioRecordatorio(
+    uiState: CreacionUiState,
+    habilitado: Boolean,
+    onTituloChange: (String) -> Unit,
+    onDescripcionChange: (String) -> Unit,
+    onCategoriaSeleccionada: (Categoria) -> Unit,
+    onPrioridadSeleccionada: (Prioridad) -> Unit,
+    onFechaLimiteSeleccionada: (Long?) -> Unit,
+    onGuardar: () -> Unit,
+    onCancelar: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        CampoTexto(
+            valor = uiState.titulo,
+            onValorChange = onTituloChange,
+            etiqueta = "Título *",
+            error = uiState.errorTitulo,
+            habilitado = habilitado
+        )
+        CampoTexto(
+            valor = uiState.descripcion,
+            onValorChange = onDescripcionChange,
+            etiqueta = "Descripción (opcional)",
+            error = uiState.errorDescripcion,
+            singleLine = false,
+            maxCaracteres = ValidacionRecordatorio.DESCRIPCION_MAX_CARACTERES,
+            habilitado = habilitado
+        )
+        SelectorOpciones(
+            titulo = "Categoría *",
+            opciones = Categoria.opciones,
+            seleccionada = uiState.categoria,
+            etiquetaDe = { it.etiqueta },
+            onSeleccion = onCategoriaSeleccionada,
+            error = uiState.errorCategoria,
+            habilitado = habilitado
+        )
+        SelectorOpciones(
+            titulo = "Prioridad *",
+            opciones = Prioridad.opciones,
+            seleccionada = uiState.prioridad,
+            etiquetaDe = { it.etiqueta },
+            onSeleccion = onPrioridadSeleccionada,
+            error = uiState.errorPrioridad,
+            habilitado = habilitado
+        )
+        CampoFecha(
+            titulo = "Fecha límite (opcional)",
+            fecha = uiState.fechaLimite,
+            onFechaSeleccionada = onFechaLimiteSeleccionada,
+            habilitado = habilitado
+        )
+
+        Text(
+            text = "* Campos obligatorios",
+            style = MaterialTheme.typography.bodySmall
+        )
+
+        // Error general de guardado (con liveRegion para que TalkBack lo anuncie)
+        val envio = uiState.envio
+        if (envio is EstadoEnvio.Error) {
+            MensajeError(
+                mensaje = envio.mensaje,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive }
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End)
         ) {
-            CampoTexto(
-                valor = uiState.titulo,
-                onValorChange = onTituloChange,
-                etiqueta = "Título *",
-                error = uiState.errorTitulo,
-                habilitado = habilitado
-            )
-            CampoTexto(
-                valor = uiState.descripcion,
-                onValorChange = onDescripcionChange,
-                etiqueta = "Descripción (opcional)",
-                error = uiState.errorDescripcion,
-                singleLine = false,
-                maxCaracteres = ValidacionRecordatorio.DESCRIPCION_MAX_CARACTERES,
-                habilitado = habilitado
-            )
-            SelectorOpciones(
-                titulo = "Categoría *",
-                opciones = Categoria.opciones,
-                seleccionada = uiState.categoria,
-                etiquetaDe = { it.etiqueta },
-                onSeleccion = onCategoriaSeleccionada,
-                error = uiState.errorCategoria,
-                habilitado = habilitado
-            )
-            SelectorOpciones(
-                titulo = "Prioridad *",
-                opciones = Prioridad.opciones,
-                seleccionada = uiState.prioridad,
-                etiquetaDe = { it.etiqueta },
-                onSeleccion = onPrioridadSeleccionada,
-                error = uiState.errorPrioridad,
-                habilitado = habilitado
-            )
-
-            Text(
-                text = "* Campos obligatorios",
-                style = MaterialTheme.typography.bodySmall
-            )
-
-            // Error general de guardado (con liveRegion para que TalkBack lo anuncie)
-            val envio = uiState.envio
-            if (envio is EstadoEnvio.Error) {
-                MensajeError(
-                    mensaje = envio.mensaje,
-                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive }
-                )
+            OutlinedButton(onClick = onCancelar, enabled = habilitado) {
+                Text("Cancelar")
             }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End)
-            ) {
-                OutlinedButton(onClick = onCancelar, enabled = habilitado) {
-                    Text("Cancelar")
-                }
-                Button(onClick = onGuardar, enabled = uiState.puedeGuardar) {
-                    if (uiState.enviando) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Guardando…")
-                    } else {
-                        Text("Guardar")
-                    }
+            Button(onClick = onGuardar, enabled = uiState.puedeGuardar) {
+                if (uiState.enviando) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Guardando…")
+                } else {
+                    Text("Guardar")
                 }
             }
         }
@@ -196,6 +236,7 @@ private fun CreacionConErroresPreview() {
             onDescripcionChange = {},
             onCategoriaSeleccionada = {},
             onPrioridadSeleccionada = {},
+            onFechaLimiteSeleccionada = {},
             onGuardar = {},
             onCancelar = {}
         )

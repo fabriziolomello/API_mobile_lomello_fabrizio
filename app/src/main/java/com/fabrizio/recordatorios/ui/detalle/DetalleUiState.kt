@@ -6,4 +6,7 @@ sealed interface DetalleUiState {
     data object Cargando : DetalleUiState
     data class Encontrado(val recordatorio: Recordatorio) : DetalleUiState
     data object NoEncontrado : DetalleUiState
+
+    // El usuario lo eliminó desde esta pantalla: la UI vuelve atrás
+    data object Eliminado : DetalleUiState
 }

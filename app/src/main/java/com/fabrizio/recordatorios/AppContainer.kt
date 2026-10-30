@@ -4,8 +4,8 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
-import com.fabrizio.recordatorios.data.RecordatorioRepository
-import com.fabrizio.recordatorios.data.RecordatorioRepositoryRoom
+import com.fabrizio.recordatorios.data.LocalFirstReminderRepository
+import com.fabrizio.recordatorios.data.ReminderRepository
 import com.fabrizio.recordatorios.data.local.AppDatabase
 import com.fabrizio.recordatorios.data.preferencias.PreferenciasRepository
 import com.fabrizio.recordatorios.data.preferencias.PreferenciasRepositoryDataStore
@@ -25,8 +25,8 @@ class AppContainer(context: Context) {
     private val database: AppDatabase by lazy { AppDatabase.getInstance(appContext) }
 
     // Se expone como la interfaz: el resto de la app no conoce la implementación
-    val repositorio: RecordatorioRepository by lazy {
-        RecordatorioRepositoryRoom(database.reminderDao())
+    val repositorio: ReminderRepository by lazy {
+        LocalFirstReminderRepository(database.reminderDao())
     }
 
     val preferencias: PreferenciasRepository by lazy {

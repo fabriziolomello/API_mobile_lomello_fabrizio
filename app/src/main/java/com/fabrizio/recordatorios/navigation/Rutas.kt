@@ -8,7 +8,10 @@ object Rutas {
 
     const val ARG_ID = "id"
     const val DETALLE = "detalle/{$ARG_ID}"
+    const val EDITAR = "editar/{$ARG_ID}"
 
     // Construye la ruta concreta: al detalle viaja solo el id
     fun detalle(id: Long): String = "detalle/$id"
+
+    fun editar(id: Long): String = "editar/$id"
 }

@@ -7,81 +7,60 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.fabrizio.recordatorios.RecordatoriosApplication
-import com.fabrizio.recordatorios.data.RecordatorioRepository
+import com.fabrizio.recordatorios.data.ReminderRepository
 import com.fabrizio.recordatorios.data.preferencias.PreferenciasRepository
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Job
+import com.fabrizio.recordatorios.data.preferencias.PreferenciasUsuario
+import com.fabrizio.recordatorios.model.Recordatorio
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
 
 class ListadoViewModel(
-    private val repositorio: RecordatorioRepository,
-    preferencias: PreferenciasRepository
+    private val repositorio: ReminderRepository,
+    private val preferencias: PreferenciasRepository
 ) : ViewModel() {
 
-    // Resultado "crudo" de la carga, sin filtros. Privado y mutable adentro.
-    private val _estadoCarga = MutableStateFlow<ListadoUiState>(ListadoUiState.Cargando)
+    // Cada reintento incrementa el contador y vuelve a suscribirse a Room
+    private val reintentos = MutableStateFlow(0)
 
-    // Lo que ve la UI: la carga combinada con las preferencias (orden y filtros).
-    // Si el usuario cambia una preferencia, la lista se reacomoda sola sin volver a cargar.
-    val uiState: StateFlow<ListadoUiState> =
-        combine(_estadoCarga, preferencias.preferencias) { estado, prefs ->
-            if (estado is ListadoUiState.Datos) {
-                val visibles = estado.recordatorios.aplicarPreferencias(prefs)
-                if (visibles.isEmpty()) ListadoUiState.SinCoincidencias
-                else ListadoUiState.Datos(visibles)
-            } else {
-                estado
-            }
-        }.stateIn(
+    // La UI observa Room (vía repositorio) combinado con las preferencias.
+    // Cualquier alta, edición o borrado en la base llega acá solo, sin recargar.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val uiState: StateFlow<ListadoUiState> = reintentos
+        .flatMapLatest {
+            combine(repositorio.observarRecordatorios(), preferencias.preferencias, ::construirEstado)
+                // Si falla la lectura local, se muestra un error con opción de reintentar
+                .catch { emit(ListadoUiState.Error("No pudimos leer tus recordatorios guardados. Intentá de nuevo.")) }
+        }
+        .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = ListadoUiState.Cargando
         )
 
-    private var cargaJob: Job? = null
-
-    init {
-        cargar()
-        // Si se guarda un recordatorio nuevo, se vuelve a cargar la lista
-        viewModelScope.launch {
-            repositorio.cambios.collect { cargar() }
-        }
-    }
-
     // --- Eventos que llegan desde la UI ---
 
-    fun onReintentar() = cargar()
+    fun onReintentar() = reintentos.update { it + 1 }
 
     // --- Lógica interna ---
 
-    private fun cargar() {
-        // Si había una carga en curso, se cancela para no pisar el resultado nuevo
-        cargaJob?.cancel()
-        cargaJob = viewModelScope.launch {
-            _estadoCarga.update { ListadoUiState.Cargando }
-            try {
-                val lista = repositorio.obtenerTodos()
-                _estadoCarga.update {
-                    if (lista.isEmpty()) ListadoUiState.Vacio else ListadoUiState.Datos(lista)
-                }
-            } catch (e: CancellationException) {
-                throw e // la cancelación no es un error: se deja propagar
-            } catch (e: Exception) {
-                _estadoCarga.update {
-                    ListadoUiState.Error("No pudimos leer tus recordatorios guardados. Intentá de nuevo.")
-                }
-            }
-        }
+    private fun construirEstado(
+        recordatorios: List<Recordatorio>,
+        prefs: PreferenciasUsuario
+    ): ListadoUiState {
+        if (recordatorios.isEmpty()) return ListadoUiState.Vacio
+        val visibles = recordatorios.aplicarPreferencias(prefs)
+        return if (visibles.isEmpty()) ListadoUiState.SinCoincidencias else ListadoUiState.Datos(visibles)
     }
 
     companion object {
-        // Factory simple: toma el repositorio de la Application y lo pasa al constructor
+        // Factory simple: toma las dependencias del AppContainer y las pasa al constructor
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app = this[APPLICATION_KEY] as RecordatoriosApplication

@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import com.fabrizio.recordatorios.data.colorPorCategoria
 import com.fabrizio.recordatorios.data.recordatoriosSimulados
 import com.fabrizio.recordatorios.model.Estado
+import com.fabrizio.recordatorios.model.FormatoFecha
 import com.fabrizio.recordatorios.model.Recordatorio
 import com.fabrizio.recordatorios.ui.theme.RecordatoriosTheme
 
@@ -83,6 +84,12 @@ fun TarjetaRecordatorio(
                 text = "Estado: ${recordatorio.estado.etiqueta}",
                 style = MaterialTheme.typography.bodyMedium
             )
+            recordatorio.fechaLimite?.let {
+                Text(
+                    text = "Vence: ${FormatoFecha.formatear(it)}",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
         }
     }
 }

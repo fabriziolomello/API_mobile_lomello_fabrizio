@@ -62,7 +62,24 @@ fun RecordatoriosApp(
             arguments = listOf(navArgument(Rutas.ARG_ID) { type = NavType.LongType })
         ) {
             // El id lo lee el DetalleViewModel desde su SavedStateHandle
-            DetalleScreen(onVolver = { navController.popBackStack() })
+            DetalleScreen(
+                onVolver = { navController.popBackStack() },
+                onEditar = { id ->
+                    navController.navigate(Rutas.editar(id)) { launchSingleTop = true }
+                }
+            )
+        }
+
+        // Mismo formulario que "crear": el CreacionViewModel detecta el id y pasa a modo edición.
+        // Al terminar vuelve al detalle, que ya muestra los cambios porque observa Room.
+        composable(
+            route = Rutas.EDITAR,
+            arguments = listOf(navArgument(Rutas.ARG_ID) { type = NavType.LongType })
+        ) {
+            CreacionScreen(
+                onGuardar = { navController.popBackStack() },
+                onCancelar = { navController.popBackStack() }
+            )
         }
     }
 }
