@@ -4,6 +4,7 @@ package com.fabrizio.recordatorios.navigation
 object Rutas {
     const val LISTADO = "listado"
     const val CREAR = "crear"
+    const val AJUSTES = "ajustes"
 
     const val ARG_ID = "id"
     const val DETALLE = "detalle/{$ARG_ID}"

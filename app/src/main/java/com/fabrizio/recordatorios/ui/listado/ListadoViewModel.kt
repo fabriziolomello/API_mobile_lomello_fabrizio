@@ -10,22 +10,42 @@ import com.fabrizio.recordatorios.RecordatoriosApplication
 import com.fabrizio.recordatorios.data.EscenarioListado
 import com.fabrizio.recordatorios.data.RecordatorioRepository
 import com.fabrizio.recordatorios.data.Simulacion
+import com.fabrizio.recordatorios.data.preferencias.PreferenciasRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class ListadoViewModel(
     private val repositorio: RecordatorioRepository,
-    private val simulacion: Simulacion
+    private val simulacion: Simulacion,
+    preferencias: PreferenciasRepository
 ) : ViewModel() {
 
-    // Privado y mutable adentro; afuera solo se expone de lectura
-    private val _uiState = MutableStateFlow<ListadoUiState>(ListadoUiState.Cargando)
-    val uiState: StateFlow<ListadoUiState> = _uiState.asStateFlow()
+    // Resultado "crudo" de la carga, sin filtros. Privado y mutable adentro.
+    private val _estadoCarga = MutableStateFlow<ListadoUiState>(ListadoUiState.Cargando)
+
+    // Lo que ve la UI: la carga combinada con las preferencias (orden y filtros).
+    // Si el usuario cambia una preferencia, la lista se reacomoda sola sin volver a cargar.
+    val uiState: StateFlow<ListadoUiState> =
+        combine(_estadoCarga, preferencias.preferencias) { estado, prefs ->
+            if (estado is ListadoUiState.Datos) {
+                val visibles = estado.recordatorios.aplicarPreferencias(prefs)
+                if (visibles.isEmpty()) ListadoUiState.SinCoincidencias
+                else ListadoUiState.Datos(visibles)
+            } else {
+                estado
+            }
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = ListadoUiState.Cargando
+        )
 
     // Opciones de simulación (solo lectura) para el menú de debug
     val escenario: StateFlow<EscenarioListado> = simulacion.escenario
@@ -58,16 +78,16 @@ class ListadoViewModel(
         // Si había una carga en curso (por ejemplo "carga sin fin"), se cancela
         cargaJob?.cancel()
         cargaJob = viewModelScope.launch {
-            _uiState.update { ListadoUiState.Cargando }
+            _estadoCarga.update { ListadoUiState.Cargando }
             try {
                 val lista = repositorio.obtenerTodos()
-                _uiState.update {
+                _estadoCarga.update {
                     if (lista.isEmpty()) ListadoUiState.Vacio else ListadoUiState.Datos(lista)
                 }
             } catch (e: CancellationException) {
                 throw e // la cancelación no es un error: se deja propagar
             } catch (e: Exception) {
-                _uiState.update {
+                _estadoCarga.update {
                     ListadoUiState.Error("No pudimos cargar tus recordatorios. Revisá tu conexión e intentá de nuevo.")
                 }
             }
@@ -79,7 +99,7 @@ class ListadoViewModel(
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app = this[APPLICATION_KEY] as RecordatoriosApplication
-                ListadoViewModel(app.repositorio, app.simulacion)
+                ListadoViewModel(app.container.repositorio, app.container.simulacion, app.container.preferencias)
             }
         }
     }

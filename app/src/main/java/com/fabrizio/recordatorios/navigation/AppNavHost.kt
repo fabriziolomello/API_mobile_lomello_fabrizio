@@ -8,6 +8,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.fabrizio.recordatorios.ui.ajustes.AjustesScreen
 import com.fabrizio.recordatorios.ui.creacion.CreacionScreen
 import com.fabrizio.recordatorios.ui.detalle.DetalleScreen
 import com.fabrizio.recordatorios.ui.listado.ListadoScreen
@@ -38,8 +39,15 @@ fun RecordatoriosApp(
                 },
                 onRecordatorioClick = { id ->
                     navController.navigate(Rutas.detalle(id)) { launchSingleTop = true }
+                },
+                onAbrirAjustes = {
+                    navController.navigate(Rutas.AJUSTES) { launchSingleTop = true }
                 }
             )
+        }
+
+        composable(Rutas.AJUSTES) {
+            AjustesScreen(onVolver = volverAlListado)
         }
 
         composable(Rutas.CREAR) {

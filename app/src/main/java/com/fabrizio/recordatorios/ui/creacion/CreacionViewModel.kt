@@ -116,7 +116,7 @@ class CreacionViewModel(
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app = this[APPLICATION_KEY] as RecordatoriosApplication
-                CreacionViewModel(app.repositorio)
+                CreacionViewModel(app.container.repositorio)
             }
         }
     }

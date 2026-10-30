@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -48,6 +49,7 @@ private const val ID_INEXISTENTE = 999L
 fun ListadoScreen(
     onCrearRecordatorio: () -> Unit,
     onRecordatorioClick: (Long) -> Unit,
+    onAbrirAjustes: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: ListadoViewModel = viewModel(factory = ListadoViewModel.Factory)
 ) {
@@ -61,6 +63,7 @@ fun ListadoScreen(
         onCrearRecordatorio = onCrearRecordatorio,
         onRecordatorioClick = onRecordatorioClick,
         onReintentar = viewModel::onReintentar,
+        onAbrirAjustes = onAbrirAjustes,
         modifier = modifier,
         menuSimulacion = {
             // El menú de simulación solo aparece en builds de debug
@@ -85,6 +88,7 @@ fun ListadoContenido(
     onCrearRecordatorio: () -> Unit,
     onRecordatorioClick: (Long) -> Unit,
     onReintentar: () -> Unit,
+    onAbrirAjustes: () -> Unit,
     modifier: Modifier = Modifier,
     menuSimulacion: @Composable () -> Unit = {}
 ) {
@@ -93,7 +97,12 @@ fun ListadoContenido(
         topBar = {
             TopAppBar(
                 title = { Text("Mis recordatorios") },
-                actions = { menuSimulacion() }
+                actions = {
+                    IconButton(onClick = onAbrirAjustes) {
+                        Icon(Icons.Filled.Settings, contentDescription = "Ajustes")
+                    }
+                    menuSimulacion()
+                }
             )
         },
         floatingActionButton = {
@@ -116,6 +125,14 @@ fun ListadoContenido(
                 mensaje = "Todavía no tenés recordatorios.",
                 textoAccion = "Crear recordatorio",
                 onAccion = onCrearRecordatorio,
+                modifier = contenidoModifier
+            )
+
+            // Los datos existen pero las preferencias los ocultan: se ofrece ir a Ajustes
+            ListadoUiState.SinCoincidencias -> EstadoVacio(
+                mensaje = "Ningún recordatorio coincide con los filtros de Ajustes.",
+                textoAccion = "Revisar ajustes",
+                onAccion = onAbrirAjustes,
                 modifier = contenidoModifier
             )
 
@@ -193,7 +210,8 @@ private fun ListadoDatosPreview() {
             uiState = ListadoUiState.Datos(recordatoriosSimulados),
             onCrearRecordatorio = {},
             onRecordatorioClick = {},
-            onReintentar = {}
+            onReintentar = {},
+            onAbrirAjustes = {}
         )
     }
 }
@@ -206,7 +224,8 @@ private fun ListadoVacioPreview() {
             uiState = ListadoUiState.Vacio,
             onCrearRecordatorio = {},
             onRecordatorioClick = {},
-            onReintentar = {}
+            onReintentar = {},
+            onAbrirAjustes = {}
         )
     }
 }

@@ -43,7 +43,7 @@ class DetalleViewModel(
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app = this[APPLICATION_KEY] as RecordatoriosApplication
-                DetalleViewModel(createSavedStateHandle(), app.repositorio)
+                DetalleViewModel(createSavedStateHandle(), app.container.repositorio)
             }
         }
     }
