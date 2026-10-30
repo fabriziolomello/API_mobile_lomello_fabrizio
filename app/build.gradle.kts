@@ -1,6 +1,9 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    // KSP: procesa las anotaciones de Room en compilación (reemplaza a kapt)
+    alias(libs.plugins.ksp)
+    alias(libs.plugins.androidx.room)
 }
 
 android {
@@ -38,6 +41,12 @@ android {
     }
 }
 
+// exportSchema = true: Room escribe el esquema de cada versión de la base en JSON.
+// Se versiona en git y sirve para revisar cambios y testear migraciones.
+room {
+    schemaDirectory("$projectDir/schemas")
+}
+
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
@@ -55,6 +64,10 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.core)
     // Actividad 3: preferencias de usuario persistentes
     implementation(libs.androidx.datastore.preferences)
+    // Actividad 3: base de datos local (fuente de verdad de los recordatorios)
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

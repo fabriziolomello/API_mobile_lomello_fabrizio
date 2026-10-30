@@ -5,8 +5,8 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
 import com.fabrizio.recordatorios.data.RecordatorioRepository
-import com.fabrizio.recordatorios.data.RecordatorioRepositoryEnMemoria
-import com.fabrizio.recordatorios.data.Simulacion
+import com.fabrizio.recordatorios.data.RecordatorioRepositoryRoom
+import com.fabrizio.recordatorios.data.local.AppDatabase
 import com.fabrizio.recordatorios.data.preferencias.PreferenciasRepository
 import com.fabrizio.recordatorios.data.preferencias.PreferenciasRepositoryDataStore
 
@@ -21,12 +21,13 @@ class AppContainer(context: Context) {
     // Se guarda el applicationContext para no retener una Activity
     private val appContext = context.applicationContext
 
-    // Para forzar un estado desde el arranque, cambiar los valores iniciales, por ejemplo:
-    // Simulacion(escenarioInicial = EscenarioListado.ERROR, fallarGuardadoInicial = true)
-    val simulacion: Simulacion by lazy { Simulacion() }
+    // Base de datos singleton (ver AppDatabase.getInstance)
+    private val database: AppDatabase by lazy { AppDatabase.getInstance(appContext) }
 
     // Se expone como la interfaz: el resto de la app no conoce la implementación
-    val repositorio: RecordatorioRepository by lazy { RecordatorioRepositoryEnMemoria(simulacion) }
+    val repositorio: RecordatorioRepository by lazy {
+        RecordatorioRepositoryRoom(database.reminderDao())
+    }
 
     val preferencias: PreferenciasRepository by lazy {
         PreferenciasRepositoryDataStore(appContext.dataStore)

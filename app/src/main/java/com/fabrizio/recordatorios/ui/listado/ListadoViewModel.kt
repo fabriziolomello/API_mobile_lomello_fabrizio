@@ -7,9 +7,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.fabrizio.recordatorios.RecordatoriosApplication
-import com.fabrizio.recordatorios.data.EscenarioListado
 import com.fabrizio.recordatorios.data.RecordatorioRepository
-import com.fabrizio.recordatorios.data.Simulacion
 import com.fabrizio.recordatorios.data.preferencias.PreferenciasRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -23,7 +21,6 @@ import kotlinx.coroutines.launch
 
 class ListadoViewModel(
     private val repositorio: RecordatorioRepository,
-    private val simulacion: Simulacion,
     preferencias: PreferenciasRepository
 ) : ViewModel() {
 
@@ -47,10 +44,6 @@ class ListadoViewModel(
             initialValue = ListadoUiState.Cargando
         )
 
-    // Opciones de simulación (solo lectura) para el menú de debug
-    val escenario: StateFlow<EscenarioListado> = simulacion.escenario
-    val fallarGuardado: StateFlow<Boolean> = simulacion.fallarGuardado
-
     private var cargaJob: Job? = null
 
     init {
@@ -65,17 +58,10 @@ class ListadoViewModel(
 
     fun onReintentar() = cargar()
 
-    fun onEscenarioSeleccionado(escenario: EscenarioListado) {
-        simulacion.cambiarEscenario(escenario)
-        cargar()
-    }
-
-    fun onFallarGuardadoChange(fallar: Boolean) = simulacion.cambiarFallarGuardado(fallar)
-
     // --- Lógica interna ---
 
     private fun cargar() {
-        // Si había una carga en curso (por ejemplo "carga sin fin"), se cancela
+        // Si había una carga en curso, se cancela para no pisar el resultado nuevo
         cargaJob?.cancel()
         cargaJob = viewModelScope.launch {
             _estadoCarga.update { ListadoUiState.Cargando }
@@ -88,7 +74,7 @@ class ListadoViewModel(
                 throw e // la cancelación no es un error: se deja propagar
             } catch (e: Exception) {
                 _estadoCarga.update {
-                    ListadoUiState.Error("No pudimos cargar tus recordatorios. Revisá tu conexión e intentá de nuevo.")
+                    ListadoUiState.Error("No pudimos leer tus recordatorios guardados. Intentá de nuevo.")
                 }
             }
         }
@@ -99,7 +85,7 @@ class ListadoViewModel(
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app = this[APPLICATION_KEY] as RecordatoriosApplication
-                ListadoViewModel(app.container.repositorio, app.container.simulacion, app.container.preferencias)
+                ListadoViewModel(app.container.repositorio, app.container.preferencias)
             }
         }
     }

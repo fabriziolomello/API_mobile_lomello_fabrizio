@@ -3,10 +3,12 @@ package com.fabrizio.recordatorios.data
 import androidx.compose.ui.graphics.Color
 import com.fabrizio.recordatorios.model.Categoria
 import com.fabrizio.recordatorios.model.Estado
+import com.fabrizio.recordatorios.model.FormatoFecha
 import com.fabrizio.recordatorios.model.Prioridad
 import com.fabrizio.recordatorios.model.Recordatorio
 
-// LIST: recordatorios simulados, con orden fijo
+// LIST: recordatorios simulados, con orden fijo.
+// Desde la Actividad 3 solo se usan en @Preview y tests: los datos reales viven en Room.
 val recordatoriosSimulados: List<Recordatorio> = listOf(
     Recordatorio(
         id = 1,
@@ -22,7 +24,7 @@ val recordatoriosSimulados: List<Recordatorio> = listOf(
         categoria = Categoria.Academica,
         prioridad = Prioridad.Media,
         estado = Estado.Pendiente,
-        fechaLimite = "28/10"
+        fechaLimite = FormatoFecha.fechaUtc(2026, 10, 28)
     ),
     Recordatorio(
         id = 3,
@@ -45,7 +47,7 @@ val recordatoriosSimulados: List<Recordatorio> = listOf(
         categoria = Categoria.Trabajo,
         prioridad = Prioridad.Alta,
         estado = Estado.Pendiente,
-        fechaLimite = "30/10"
+        fechaLimite = FormatoFecha.fechaUtc(2026, 10, 30)
     ),
     Recordatorio(
         id = 6,

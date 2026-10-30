@@ -7,5 +7,6 @@ data class Recordatorio(
     val prioridad: Prioridad,
     val estado: Estado,
     val descripcion: String? = null,
-    val fechaLimite: String? = null
+    // Epoch millis a medianoche UTC (ver FormatoFecha)
+    val fechaLimite: Long? = null
 )

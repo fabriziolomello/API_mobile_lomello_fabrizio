@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.fabrizio.recordatorios.data.recordatoriosSimulados
+import com.fabrizio.recordatorios.model.FormatoFecha
 import com.fabrizio.recordatorios.model.Recordatorio
 import com.fabrizio.recordatorios.ui.components.EstadoError
 import com.fabrizio.recordatorios.ui.components.IndicadorCarga
@@ -112,7 +113,7 @@ private fun DetalleRecordatorio(
                 FilaDato("Categoría", recordatorio.categoria.etiqueta)
                 FilaDato("Prioridad", recordatorio.prioridad.etiqueta)
                 FilaDato("Estado", recordatorio.estado.etiqueta)
-                FilaDato("Fecha límite", recordatorio.fechaLimite ?: "Sin fecha límite")
+                FilaDato("Fecha límite", recordatorio.fechaLimite?.let(FormatoFecha::formatear) ?: "Sin fecha límite")
                 FilaDato("Descripción", recordatorio.descripcion ?: "Sin descripción")
             }
         }
