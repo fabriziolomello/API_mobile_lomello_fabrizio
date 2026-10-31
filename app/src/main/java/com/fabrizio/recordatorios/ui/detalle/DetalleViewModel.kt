@@ -73,6 +73,12 @@ class DetalleViewModel(
         }
     }
 
+    // Reintento manual de un cambio que el servidor rechazó (estado "Error al sincronizar")
+    fun onReintentarSync() {
+        val idActual = id ?: return
+        ejecutar("No se pudo reintentar la sincronización.") { repositorio.reintentar(idActual) }
+    }
+
     fun onMensajeMostrado() = _mensaje.update { null }
 
     // --- Auxiliares ---

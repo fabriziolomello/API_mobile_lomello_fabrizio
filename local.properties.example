@@ -1,0 +1,9 @@
+# Copiá este archivo como "local.properties" (en la raíz del proyecto) y completá los valores.
+# local.properties está en .gitignore: nunca se sube al repositorio.
+
+# Ruta al Android SDK (Android Studio la completa sola al abrir el proyecto)
+sdk.dir=/ruta/a/tu/Android/sdk
+
+# URL base del servicio remoto, terminada en "/" y SIN el nombre del recurso.
+# Con MockAPI.io: https://<id-de-tu-proyecto>.mockapi.io/api/v1/
+API_BASE_URL=https://TU_ID_DE_PROYECTO.mockapi.io/api/v1/

@@ -45,10 +45,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.fabrizio.recordatorios.data.recordatoriosSimulados
 import com.fabrizio.recordatorios.model.Estado
+import com.fabrizio.recordatorios.model.EstadoSync
 import com.fabrizio.recordatorios.model.FormatoFecha
 import com.fabrizio.recordatorios.model.Recordatorio
 import com.fabrizio.recordatorios.ui.components.EstadoError
 import com.fabrizio.recordatorios.ui.components.IndicadorCarga
+import com.fabrizio.recordatorios.ui.components.IndicadorSync
 import com.fabrizio.recordatorios.ui.theme.RecordatoriosTheme
 
 @Composable
@@ -81,6 +83,7 @@ fun DetalleScreen(
         onEditar = onEditar,
         onCompletadoChange = viewModel::onCompletadoChange,
         onEliminarConfirmado = viewModel::onEliminarConfirmado,
+        onReintentarSync = viewModel::onReintentarSync,
         snackbarHostState = snackbarHostState,
         modifier = modifier
     )
@@ -94,6 +97,7 @@ fun DetalleContenido(
     onEditar: (Long) -> Unit,
     onCompletadoChange: (Boolean) -> Unit,
     onEliminarConfirmado: () -> Unit,
+    onReintentarSync: () -> Unit,
     modifier: Modifier = Modifier,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() }
 ) {
@@ -145,6 +149,7 @@ fun DetalleContenido(
             is DetalleUiState.Encontrado -> DetalleRecordatorio(
                 recordatorio = uiState.recordatorio,
                 onCompletadoChange = onCompletadoChange,
+                onReintentarSync = onReintentarSync,
                 modifier = contenidoModifier
             )
         }
@@ -172,6 +177,7 @@ fun DetalleContenido(
 private fun DetalleRecordatorio(
     recordatorio: Recordatorio,
     onCompletadoChange: (Boolean) -> Unit,
+    onReintentarSync: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val estaCompletado = recordatorio.estado == Estado.Completado
@@ -199,6 +205,15 @@ private fun DetalleRecordatorio(
                 FilaDato("Estado", recordatorio.estado.etiqueta)
                 FilaDato("Fecha límite", recordatorio.fechaLimite?.let(FormatoFecha::formatear) ?: "Sin fecha límite")
                 FilaDato("Descripción", recordatorio.descripcion ?: "Sin descripción")
+                HorizontalDivider()
+                Text(text = "Sincronización", style = MaterialTheme.typography.labelMedium)
+                IndicadorSync(estado = recordatorio.estadoSync)
+                // Si el servidor rechazó el cambio, se ofrece reintentar
+                if (recordatorio.estadoSync == EstadoSync.ERROR) {
+                    OutlinedButton(onClick = onReintentarSync) {
+                        Text("Reintentar sincronización")
+                    }
+                }
             }
         }
 
@@ -235,7 +250,8 @@ private fun DetallePreview() {
             onVolver = {},
             onEditar = {},
             onCompletadoChange = {},
-            onEliminarConfirmado = {}
+            onEliminarConfirmado = {},
+            onReintentarSync = {}
         )
     }
 }
@@ -249,7 +265,8 @@ private fun DetalleNoEncontradoPreview() {
             onVolver = {},
             onEditar = {},
             onCompletadoChange = {},
-            onEliminarConfirmado = {}
+            onEliminarConfirmado = {},
+            onReintentarSync = {}
         )
     }
 }

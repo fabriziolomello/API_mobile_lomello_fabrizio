@@ -3,6 +3,7 @@ package com.fabrizio.recordatorios.data.mapper
 import com.fabrizio.recordatorios.data.local.ReminderEntity
 import com.fabrizio.recordatorios.data.local.SyncStatus
 import com.fabrizio.recordatorios.model.Estado
+import com.fabrizio.recordatorios.model.EstadoSync
 import com.fabrizio.recordatorios.model.Recordatorio
 
 // Mappers Entity <-> dominio. La UI solo conoce Recordatorio; los campos de
@@ -15,8 +16,16 @@ fun ReminderEntity.toDomain(): Recordatorio = Recordatorio(
     prioridad = priority,
     estado = if (isCompleted) Estado.Completado else Estado.Pendiente,
     descripcion = description,
-    fechaLimite = dueDate
+    fechaLimite = dueDate,
+    estadoSync = syncStatus.toEstadoSync()
 )
+
+// Los 5 estados técnicos se resumen en 3 para el usuario
+fun SyncStatus.toEstadoSync(): EstadoSync = when (this) {
+    SyncStatus.PENDING_CREATE, SyncStatus.PENDING_UPDATE, SyncStatus.PENDING_DELETE -> EstadoSync.PENDIENTE
+    SyncStatus.SYNCED -> EstadoSync.SINCRONIZADO
+    SyncStatus.FAILED -> EstadoSync.ERROR
+}
 
 // Alta local: el clientId (UUID) se genera una sola vez y nunca cambia.
 // Queda PENDING_CREATE hasta que el servidor confirme.

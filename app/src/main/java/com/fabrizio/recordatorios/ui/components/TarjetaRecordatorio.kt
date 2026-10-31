@@ -90,6 +90,8 @@ fun TarjetaRecordatorio(
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
+            Spacer(modifier = Modifier.padding(top = 4.dp))
+            IndicadorSync(estado = recordatorio.estadoSync)
         }
     }
 }

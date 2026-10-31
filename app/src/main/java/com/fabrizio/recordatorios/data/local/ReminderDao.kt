@@ -70,4 +70,62 @@ interface ReminderDao {
 
     @Query("SELECT * FROM reminders WHERE sync_status = 'FAILED'")
     suspend fun getFailed(): List<ReminderEntity>
+
+    // Filas con remoteId (para detectar las que se borraron en el servidor)
+    @Query("SELECT * FROM reminders WHERE remote_id IS NOT NULL")
+    suspend fun getWithRemoteId(): List<ReminderEntity>
+
+    // Cantidad de cambios sin enviar (indicador en la UI)
+    @Query(
+        "SELECT COUNT(*) FROM reminders " +
+            "WHERE sync_status IN ('PENDING_CREATE', 'PENDING_UPDATE', 'PENDING_DELETE')"
+    )
+    fun observePendingCount(): Flow<Int>
+
+    // --- Actualizaciones condicionales para la sincronización ---
+    // Todas comparan updated_at con el valor que se ENVIÓ al servidor: si el usuario
+    // editó el recordatorio mientras la petición viajaba, no se pisa su cambio
+    // (devuelven 0 filas y el registro sigue pendiente para la próxima vuelta).
+
+    @Query(
+        "UPDATE reminders SET remote_id = :remoteId, sync_status = 'SYNCED' " +
+            "WHERE id = :id AND updated_at = :updatedAtEnviado"
+    )
+    suspend fun markSynced(id: Long, remoteId: String, updatedAtEnviado: Long): Int
+
+    // El servidor confirmó la creación pero la fila cambió mientras tanto:
+    // se guarda el remoteId igual (para no volver a crearla) y queda como actualización.
+    @Query(
+        "UPDATE reminders SET remote_id = :remoteId, " +
+            "sync_status = CASE WHEN sync_status = 'PENDING_CREATE' THEN 'PENDING_UPDATE' ELSE sync_status END " +
+            "WHERE id = :id"
+    )
+    suspend fun assignRemoteId(id: Long, remoteId: String): Int
+
+    @Query("UPDATE reminders SET sync_status = 'FAILED' WHERE id = :id AND updated_at = :updatedAtEnviado")
+    suspend fun markFailed(id: Long, updatedAtEnviado: Long): Int
+
+    // El servidor ya no tiene el registro (404 en un PUT): se vuelve a crear.
+    // Mantiene el clientId, así la verificación previa al POST evita duplicados.
+    @Query("UPDATE reminders SET remote_id = NULL, sync_status = 'PENDING_CREATE' WHERE id = :id")
+    suspend fun resetToPendingCreate(id: Long)
+
+    // Solo borra si sigue marcada para borrar (confirmación del DELETE remoto)
+    @Query("DELETE FROM reminders WHERE id = :id AND sync_status = 'PENDING_DELETE'")
+    suspend fun deleteIfPendingDelete(id: Long): Int
+
+    // Reintento manual de operaciones rechazadas (4xx): vuelven a quedar pendientes
+    @Query(
+        "UPDATE reminders SET sync_status = " +
+            "CASE WHEN remote_id IS NULL THEN 'PENDING_CREATE' ELSE 'PENDING_UPDATE' END " +
+            "WHERE id = :id AND sync_status = 'FAILED'"
+    )
+    suspend fun retryFailed(id: Long): Int
+
+    @Query(
+        "UPDATE reminders SET sync_status = " +
+            "CASE WHEN remote_id IS NULL THEN 'PENDING_CREATE' ELSE 'PENDING_UPDATE' END " +
+            "WHERE sync_status = 'FAILED'"
+    )
+    suspend fun retryAllFailed(): Int
 }

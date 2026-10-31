@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -25,6 +26,11 @@ interface PreferenciasRepository {
     suspend fun guardarOrden(orden: CriterioOrden)
     suspend fun guardarFiltroPrioridad(filtro: FiltroPrioridad)
 
+    // Hora (epoch millis) del último sync exitoso; null si nunca se sincronizó.
+    // Es un dato chico de estado, no una colección: por eso puede ir en DataStore.
+    val ultimaSincronizacion: Flow<Long?>
+    suspend fun guardarUltimaSincronizacion(momento: Long)
+
     // Solo para pruebas (builds de debug): guarda un tema inexistente para
     // demostrar que la lectura vuelve al valor por defecto sin romper la app.
     suspend fun guardarTemaInvalidoParaPrueba()
@@ -41,16 +47,26 @@ class PreferenciasRepositoryDataStore(
         val MOSTRAR_COMPLETADOS = booleanPreferencesKey("mostrar_completados")
         val ORDEN = stringPreferencesKey("orden")
         val FILTRO_PRIORIDAD = stringPreferencesKey("filtro_prioridad")
+        val ULTIMA_SINCRONIZACION = longPreferencesKey("ultima_sincronizacion")
     }
 
-    override val preferencias: Flow<PreferenciasUsuario> = dataStore.data
-        // Error de lectura recuperable (archivo dañado o inaccesible): se usan los defaults.
-        // Cualquier otra excepción es un bug y se deja propagar.
-        .catch { e ->
-            if (e is IOException) emit(emptyPreferences()) else throw e
-        }
+    // Lectura segura compartida: IOException -> preferencias vacías (valores por defecto)
+    private val datosSeguros: Flow<Preferences> = dataStore.data
+        .catch { e -> if (e is IOException) emit(emptyPreferences()) else throw e }
+
+    // Error de lectura recuperable (archivo dañado o inaccesible): se usan los defaults.
+    // Cualquier otra excepción es un bug y se deja propagar (ver datosSeguros).
+    override val preferencias: Flow<PreferenciasUsuario> = datosSeguros
         .map { it.toPreferenciasUsuario() }
         .distinctUntilChanged()
+
+    override val ultimaSincronizacion: Flow<Long?> = datosSeguros
+        .map { it[Claves.ULTIMA_SINCRONIZACION] }
+        .distinctUntilChanged()
+
+    override suspend fun guardarUltimaSincronizacion(momento: Long) {
+        dataStore.edit { it[Claves.ULTIMA_SINCRONIZACION] = momento }
+    }
 
     override suspend fun guardarTema(tema: TemaApp) {
         dataStore.edit { it[Claves.TEMA] = tema.name }

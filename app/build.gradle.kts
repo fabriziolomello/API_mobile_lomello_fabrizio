@@ -1,10 +1,25 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    // kotlinx.serialization: genera los serializadores de los DTO en compilación
+    alias(libs.plugins.kotlin.serialization)
     // KSP: procesa las anotaciones de Room en compilación (reemplaza a kapt)
     alias(libs.plugins.ksp)
     alias(libs.plugins.androidx.room)
 }
+
+// URL base del servicio remoto, leída de local.properties (que NO se sube a git).
+// Ver local.properties.example. Si falta, se usa una URL inválida: la app funciona
+// igual en modo offline y la sincronización informa "sin conexión".
+val propiedadesLocales = Properties().apply {
+    val archivo = providers.fileContents(rootProject.layout.projectDirectory.file("local.properties"))
+    archivo.asText.orNull?.let { load(it.reader()) }
+}
+val apiBaseUrl: String = (propiedadesLocales.getProperty("API_BASE_URL") ?: "https://sin-configurar.invalid/")
+    .trim()
+    .let { if (it.endsWith("/")) it else "$it/" } // Retrofit exige la barra final
 
 android {
     namespace = "com.fabrizio.recordatorios"
@@ -20,6 +35,8 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
     }
 
     buildTypes {
@@ -36,7 +53,7 @@ android {
     }
     buildFeatures {
         compose = true
-        // Para BuildConfig.DEBUG: el menú de simulación solo aparece en builds de debug
+        // BuildConfig.DEBUG (herramientas solo de debug) y BuildConfig.API_BASE_URL
         buildConfig = true
     }
 }
@@ -68,6 +85,12 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
+    // Actividad 3: servicio remoto
+    implementation(libs.retrofit)
+    implementation(libs.retrofit.converter.kotlinx.serialization)
+    implementation(libs.okhttp)
+    implementation(libs.okhttp.logging.interceptor)
+    implementation(libs.kotlinx.serialization.json)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

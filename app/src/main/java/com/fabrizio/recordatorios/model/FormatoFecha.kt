@@ -16,6 +16,10 @@ object FormatoFecha {
             .apply { timeZone = UTC }
             .format(millis)
 
+    // Fecha y hora en la zona del dispositivo (para "última sincronización")
+    fun formatearFechaHora(millis: Long): String =
+        SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()).format(millis)
+
     // mes de 1 a 12
     fun fechaUtc(anio: Int, mes: Int, dia: Int): Long =
         Calendar.getInstance(UTC).run {

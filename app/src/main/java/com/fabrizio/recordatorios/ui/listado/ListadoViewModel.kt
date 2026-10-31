@@ -10,6 +10,11 @@ import com.fabrizio.recordatorios.RecordatoriosApplication
 import com.fabrizio.recordatorios.data.ReminderRepository
 import com.fabrizio.recordatorios.data.preferencias.PreferenciasRepository
 import com.fabrizio.recordatorios.data.preferencias.PreferenciasUsuario
+import com.fabrizio.recordatorios.data.remote.FallaSimulada
+import com.fabrizio.recordatorios.data.remote.SimuladorFallas
+import com.fabrizio.recordatorios.data.sync.ConnectivityObserver
+import com.fabrizio.recordatorios.data.sync.EstadoSincronizacion
+import com.fabrizio.recordatorios.model.FormatoFecha
 import com.fabrizio.recordatorios.model.Recordatorio
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,10 +25,13 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 
 class ListadoViewModel(
     private val repositorio: ReminderRepository,
-    private val preferencias: PreferenciasRepository
+    private val preferencias: PreferenciasRepository,
+    conectividad: ConnectivityObserver,
+    private val simuladorFallas: SimuladorFallas
 ) : ViewModel() {
 
     // Cada reintento incrementa el contador y vuelve a suscribirse a Room
@@ -44,9 +52,45 @@ class ListadoViewModel(
             initialValue = ListadoUiState.Cargando
         )
 
+    // Estado de la sincronización para la barra superior y el Snackbar.
+    // Combina 4 fuentes: estado del sync, pendientes (Room), último sync (DataStore) y la red.
+    val sincronizacion: StateFlow<SincronizacionUi> = combine(
+        repositorio.estadoSincronizacion,
+        repositorio.cambiosPendientes,
+        repositorio.ultimaSincronizacion,
+        conectividad.estaConectado
+    ) { estado, pendientes, ultima, conectado ->
+        SincronizacionUi(
+            sincronizando = estado == EstadoSincronizacion.Sincronizando,
+            conectado = conectado,
+            pendientes = pendientes,
+            ultimaSincronizacion = ultima?.let(FormatoFecha::formatearFechaHora),
+            error = estado as? EstadoSincronizacion.Error
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = SincronizacionUi()
+    )
+
+    // Solo debug: falla de red forzada por el simulador
+    val fallaSimulada: StateFlow<FallaSimulada> = simuladorFallas.falla
+
     // --- Eventos que llegan desde la UI ---
 
     fun onReintentar() = reintentos.update { it + 1 }
+
+    // Pull-to-refresh o botón: sync manual. Si falla, el error llega por el estado "sincronizacion"
+    fun onSincronizar() {
+        viewModelScope.launch { repositorio.sincronizar() }
+    }
+
+    // Acción "Reintentar" del Snackbar: también reintenta los cambios rechazados
+    fun onReintentarSincronizacion() {
+        viewModelScope.launch { repositorio.reintentarFallidos() }
+    }
+
+    fun onFallaSimuladaSeleccionada(falla: FallaSimulada) = simuladorFallas.cambiarFalla(falla)
 
     // --- Lógica interna ---
 
@@ -64,7 +108,12 @@ class ListadoViewModel(
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app = this[APPLICATION_KEY] as RecordatoriosApplication
-                ListadoViewModel(app.container.repositorio, app.container.preferencias)
+                ListadoViewModel(
+                    repositorio = app.container.repositorio,
+                    preferencias = app.container.preferencias,
+                    conectividad = app.container.conectividad,
+                    simuladorFallas = app.container.simuladorFallas
+                )
             }
         }
     }

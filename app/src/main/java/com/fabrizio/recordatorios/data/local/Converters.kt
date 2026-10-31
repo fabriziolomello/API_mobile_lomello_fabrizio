@@ -10,27 +10,16 @@ import com.fabrizio.recordatorios.model.Prioridad
 class Converters {
 
     @TypeConverter
-    fun categoriaACodigo(categoria: Categoria): String = when (categoria) {
-        Categoria.Estudio -> "ESTUDIO"
-        Categoria.Academica -> "ACADEMICA"
-        Categoria.Personal -> "PERSONAL"
-        Categoria.Trabajo -> "TRABAJO"
-    }
+    fun categoriaACodigo(categoria: Categoria): String = categoria.codigo
 
     @TypeConverter
-    fun codigoACategoria(codigo: String): Categoria =
-        Categoria.opciones.firstOrNull { categoriaACodigo(it) == codigo } ?: Categoria.Personal
+    fun codigoACategoria(codigo: String): Categoria = Categoria.desdeCodigo(codigo)
 
     @TypeConverter
-    fun prioridadACodigo(prioridad: Prioridad): String = when (prioridad) {
-        Prioridad.Alta -> "ALTA"
-        Prioridad.Media -> "MEDIA"
-        Prioridad.Baja -> "BAJA"
-    }
+    fun prioridadACodigo(prioridad: Prioridad): String = prioridad.codigo
 
     @TypeConverter
-    fun codigoAPrioridad(codigo: String): Prioridad =
-        Prioridad.opciones.firstOrNull { prioridadACodigo(it) == codigo } ?: Prioridad.Media
+    fun codigoAPrioridad(codigo: String): Prioridad = Prioridad.desdeCodigo(codigo)
 
     @TypeConverter
     fun syncStatusACodigo(status: SyncStatus): String = status.name

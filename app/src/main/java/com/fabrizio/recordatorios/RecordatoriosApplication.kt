@@ -7,4 +7,10 @@ import android.app.Application
 class RecordatoriosApplication : Application() {
 
     val container: AppContainer by lazy { AppContainer(this) }
+
+    override fun onCreate() {
+        super.onCreate()
+        // Sincroniza al abrir la app y cada vez que vuelve la conexión
+        container.syncManager.iniciar()
+    }
 }
