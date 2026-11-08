@@ -1,5 +1,8 @@
 package com.fabrizio.recordatorios
 
+import com.fabrizio.recordatorios.data.auth.AuthError
+import com.fabrizio.recordatorios.data.auth.AuthRepository
+import com.fabrizio.recordatorios.data.auth.AuthUser
 import com.fabrizio.recordatorios.data.local.ReminderDao
 import com.fabrizio.recordatorios.data.local.ReminderEntity
 import com.fabrizio.recordatorios.data.local.SyncStatus
@@ -157,4 +160,30 @@ class FakePreferenciasRepository : PreferenciasRepository {
     override suspend fun guardarOrden(orden: CriterioOrden) = Unit
     override suspend fun guardarFiltroPrioridad(filtro: FiltroPrioridad) = Unit
     override suspend fun guardarTemaInvalidoParaPrueba() = Unit
+}
+
+// Autenticación falsa en memoria: registra las llamadas y permite forzar un error
+class FakeAuthRepository(usuarioInicial: AuthUser? = null) : AuthRepository {
+    val sesion = MutableStateFlow(usuarioInicial)
+    override val currentUser: Flow<AuthUser?> = sesion
+
+    // Si no es null, register y login fallan con este error
+    var falla: AuthError? = null
+    var llamadas = 0
+        private set
+    var ultimoCorreo: String? = null
+        private set
+
+    private fun autenticar(email: String): Result<AuthUser> {
+        llamadas++
+        ultimoCorreo = email
+        falla?.let { return Result.failure(it) }
+        val usuario = AuthUser(uid = "uid-1", email = email)
+        sesion.value = usuario
+        return Result.success(usuario)
+    }
+
+    override suspend fun register(email: String, password: String) = autenticar(email)
+    override suspend fun login(email: String, password: String) = autenticar(email)
+    override fun logout() { sesion.value = null }
 }

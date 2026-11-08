@@ -7,6 +7,8 @@ import androidx.datastore.preferences.preferencesDataStore
 import androidx.room.withTransaction
 import com.fabrizio.recordatorios.data.LocalFirstReminderRepository
 import com.fabrizio.recordatorios.data.ReminderRepository
+import com.fabrizio.recordatorios.data.auth.AuthRepository
+import com.fabrizio.recordatorios.data.auth.FirebaseAuthRepository
 import com.fabrizio.recordatorios.data.local.AppDatabase
 import com.fabrizio.recordatorios.data.preferencias.PreferenciasRepository
 import com.fabrizio.recordatorios.data.preferencias.PreferenciasRepositoryDataStore
@@ -16,6 +18,7 @@ import com.fabrizio.recordatorios.data.remote.SimuladorFallas
 import com.fabrizio.recordatorios.data.sync.AndroidConnectivityObserver
 import com.fabrizio.recordatorios.data.sync.ConnectivityObserver
 import com.fabrizio.recordatorios.data.sync.SyncManager
+import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -65,4 +68,8 @@ class AppContainer(context: Context) {
     val repositorio: ReminderRepository by lazy {
         LocalFirstReminderRepository(database.reminderDao(), syncManager, preferencias)
     }
+
+    // Actividad 4: autenticación. Se expone como la interfaz; FirebaseAuth se inicializa
+    // solo (FirebaseInitProvider) con los datos de google-services.json.
+    val autenticacion: AuthRepository by lazy { FirebaseAuthRepository(FirebaseAuth.getInstance()) }
 }
