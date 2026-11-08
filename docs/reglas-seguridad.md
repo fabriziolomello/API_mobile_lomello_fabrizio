@@ -12,7 +12,7 @@ completo con `set()` (`CloudReminder.toMap()` en `CloudMappers.kt`):
 | Campo | Tipo en Firestore | ¿Puede ser null? | Notas |
 |---|---|---|---|
 | `clientId` | string | no | UUID; igual al ID del documento |
-| `title` | string | no | la UI exige ≥ 4 caracteres (con trim) |
+| `title` | string | no | la UI exige entre 4 y 200 caracteres (con trim) |
 | `description` | string | **sí** (se escribe `null`) | la UI limita a 200 caracteres |
 | `category` | string | no | `ESTUDIO`, `ACADEMICA`, `PERSONAL`, `TRABAJO` |
 | `priority` | string | no | `ALTA`, `MEDIA`, `BAJA` |
@@ -20,6 +20,11 @@ completo con `set()` (`CloudReminder.toMap()` en `CloudMappers.kt`):
 | `dueDate` | entero (int64) | **sí** (se escribe `null`) | epoch millis, medianoche UTC |
 | `createdAt` | entero (int64) | no | epoch millis |
 | `updatedAt` | entero (int64) | no | epoch millis del dispositivo |
+
+**Límite del título:** las reglas exigen `title.size() <= 200` y la app valida lo mismo
+(`ValidacionRecordatorio.TITULO_MAX_CARACTERES = 200`). Los dos valores tienen que
+coincidir: si la app permitiera títulos más largos, se guardarían en Room pero Firestore
+rechazaría el `set()` y la fila quedaría en error de sincronización.
 
 Los nueve campos se escriben siempre: los opcionales van como `null`, no se omiten. Las
 reglas aceptan igual que falten, por si en el futuro el mapper deja de escribirlos.

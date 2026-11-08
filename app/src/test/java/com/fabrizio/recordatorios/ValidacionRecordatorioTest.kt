@@ -16,6 +16,18 @@ class ValidacionRecordatorioTest {
     }
 
     @Test
+    fun titulo_maximo200() {
+        assertNull(ValidacionRecordatorio.validarTitulo("a".repeat(200)))
+        assertNotNull(ValidacionRecordatorio.validarTitulo("a".repeat(201)))
+    }
+
+    @Test
+    fun titulo_maximoSeMideDespuesDeTrim() {
+        // 200 caracteres útiles + espacios alrededor: se guarda recortado, es válido
+        assertNull(ValidacionRecordatorio.validarTitulo("  " + "a".repeat(200) + "  "))
+    }
+
+    @Test
     fun descripcion_maximo200() {
         assertNull(ValidacionRecordatorio.validarDescripcion("a".repeat(200)))
         assertNotNull(ValidacionRecordatorio.validarDescripcion("a".repeat(201)))

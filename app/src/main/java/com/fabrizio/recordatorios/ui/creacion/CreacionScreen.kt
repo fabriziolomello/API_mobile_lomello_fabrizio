@@ -149,6 +149,7 @@ private fun FormularioRecordatorio(
             onValorChange = onTituloChange,
             etiqueta = "Título *",
             error = uiState.errorTitulo,
+            maxCaracteres = ValidacionRecordatorio.TITULO_MAX_CARACTERES,
             habilitado = habilitado
         )
         CampoTexto(

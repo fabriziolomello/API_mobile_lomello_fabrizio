@@ -6,14 +6,23 @@ package com.fabrizio.recordatorios.model
 object ValidacionRecordatorio {
 
     const val TITULO_MIN_CARACTERES = 4
+
+    // Mismo límite que firestore.rules (title.size() <= 200): un título más largo se
+    // guardaría en Room pero Firestore lo rechazaría y la fila quedaría en error.
+    const val TITULO_MAX_CARACTERES = 200
     const val DESCRIPCION_MAX_CARACTERES = 200
 
-    fun validarTitulo(titulo: String): String? =
-        if (titulo.trim().length < TITULO_MIN_CARACTERES) {
-            "El título debe tener al menos $TITULO_MIN_CARACTERES caracteres"
-        } else {
-            null
+    // Se mide después de trim(): es lo que se guarda y se sincroniza
+    fun validarTitulo(titulo: String): String? {
+        val largo = titulo.trim().length
+        return when {
+            largo < TITULO_MIN_CARACTERES ->
+                "El título debe tener al menos $TITULO_MIN_CARACTERES caracteres"
+            largo > TITULO_MAX_CARACTERES ->
+                "El título no puede superar los $TITULO_MAX_CARACTERES caracteres"
+            else -> null
         }
+    }
 
     fun validarDescripcion(descripcion: String): String? =
         if (descripcion.length > DESCRIPCION_MAX_CARACTERES) {
