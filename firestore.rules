@@ -1,0 +1,51 @@
+rules_version = '2';
+
+// Reglas de Firestore de Recordatorios.
+// Único dato accesible: users/{uid}/reminders/{reminderId}, y solo para su dueño.
+// Cualquier otra ruta no tiene match, así que queda denegada por defecto.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Hay sesión y es la del dueño de la ruta (nadie lee ni escribe datos ajenos)
+    function esDueno(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    // Contenido de un recordatorio tal como lo escribe CloudReminder.toMap().
+    // Protege contra documentos con campos de más, tipos incorrectos o tamaños abusivos.
+    function esRecordatorioValido(reminderId) {
+      let d = request.resource.data;
+      return
+        // Solo los campos conocidos; los obligatorios siempre presentes
+        d.keys().hasOnly(['clientId', 'title', 'description', 'category', 'priority',
+                          'completed', 'dueDate', 'createdAt', 'updatedAt'])
+        && d.keys().hasAll(['title', 'category', 'priority', 'completed',
+                            'createdAt', 'updatedAt'])
+        // Texto: título no vacío y acotado; descripción opcional y acotada
+        && d.title is string && d.title.size() > 0 && d.title.size() <= 200
+        && (!('description' in d) || d.description == null
+            || (d.description is string && d.description.size() <= 2000))
+        // Códigos estables de Categoria y Prioridad
+        && d.category is string && d.category in ['ESTUDIO', 'ACADEMICA', 'PERSONAL', 'TRABAJO']
+        && d.priority is string && d.priority in ['ALTA', 'MEDIA', 'BAJA']
+        && d.completed is bool
+        // Fechas en epoch millis (Long en la app -> entero en Firestore)
+        && (!('dueDate' in d) || d.dueDate == null || d.dueDate is int)
+        && d.createdAt is int && d.createdAt > 0
+        && d.updatedAt is int && d.updatedAt > 0
+        // El clientId del contenido no puede apuntar a otro documento
+        && (!('clientId' in d) || d.clientId == reminderId);
+    }
+
+    match /users/{uid}/reminders/{reminderId} {
+      // Lectura de un documento y de la colección: solo el dueño
+      allow get, list: if esDueno(uid);
+
+      // La app siempre hace set() del documento completo: mismo chequeo para alta y edición
+      allow create, update: if esDueno(uid) && esRecordatorioValido(reminderId);
+
+      // Borrado: solo el dueño
+      allow delete: if esDueno(uid);
+    }
+  }
+}
