@@ -10,11 +10,11 @@ import com.fabrizio.recordatorios.data.ReminderRepository
 import com.fabrizio.recordatorios.data.auth.AuthRepository
 import com.fabrizio.recordatorios.data.auth.CierreSesion
 import com.fabrizio.recordatorios.data.auth.FirebaseAuthRepository
+import com.fabrizio.recordatorios.data.cloud.FirestoreReminderDataSource
+import com.fabrizio.recordatorios.data.cloud.crearFirestoreSinCachePersistente
 import com.fabrizio.recordatorios.data.local.AppDatabase
 import com.fabrizio.recordatorios.data.preferencias.PreferenciasRepository
 import com.fabrizio.recordatorios.data.preferencias.PreferenciasRepositoryDataStore
-import com.fabrizio.recordatorios.data.remote.NetworkModule
-import com.fabrizio.recordatorios.data.remote.RetrofitReminderRemoteDataSource
 import com.fabrizio.recordatorios.data.remote.SimuladorFallas
 import com.fabrizio.recordatorios.data.sync.AndroidConnectivityObserver
 import com.fabrizio.recordatorios.data.sync.ConnectivityObserver
@@ -60,21 +60,25 @@ class AppContainer(context: Context) {
 
     val conectividad: ConnectivityObserver by lazy { AndroidConnectivityObserver(appContext) }
 
-    // Solo tiene efecto en debug (el interceptor no se agrega en release)
+    // Herramienta de debug de la Actividad 3: simula fallas en el interceptor de OkHttp
+    // (MockAPI). Desde la Actividad 4 la sincronización usa Firestore, así que ya no la
+    // afecta; se mantiene porque el menú de debug del listado la sigue usando.
     val simuladorFallas: SimuladorFallas by lazy { SimuladorFallas() }
 
-    // URL base desde BuildConfig (definida en local.properties, nunca en el código)
-    private val api by lazy { NetworkModule.crearApi(BuildConfig.API_BASE_URL, simuladorFallas) }
+    // Actividad 4: Firestore con caché persistente desactivada. Este es el ÚNICO lugar que
+    // obtiene la instancia, y la configura antes de cualquier uso (ver data/cloud).
+    // MockAPI/Retrofit (data/remote) quedan en el código pero ya no se cablean.
+    private val firestore by lazy { crearFirestoreSinCachePersistente() }
 
     val syncManager: SyncManager by lazy {
         SyncManager(
             dao = database.reminderDao(),
-            remoto = RetrofitReminderRemoteDataSource(api),
+            nube = FirestoreReminderDataSource(firestore),
             conectividad = conectividad,
             appScope = syncScope,
             enTransaccion = { bloque -> database.withTransaction { bloque() } },
             registrarSincronizacion = preferencias::guardarUltimaSincronizacion,
-            // Cada vuelta de sync trabaja solo con las filas del usuario logueado
+            // El sync trabaja solo con las filas del usuario logueado
             usuarioActual = { autenticacion.currentUser.first()?.uid }
         )
     }

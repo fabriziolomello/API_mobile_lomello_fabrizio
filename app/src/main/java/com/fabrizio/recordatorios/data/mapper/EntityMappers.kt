@@ -58,9 +58,9 @@ fun ReminderEntity.aplicarEdicion(editado: Recordatorio, ahora: Long): ReminderE
     syncStatus = estadoTrasEdicionLocal()
 )
 
-// Regla de pendientes al editar:
-// - Si el servidor todavía no lo conoce (sin remoteId), sigue siendo una creación:
-//   se enviará un solo POST con los datos más nuevos, no un POST y después un PUT.
-// - Si ya existe en el servidor, queda como actualización pendiente (PUT).
+// Regla de pendientes al editar (por estado, no por remoteId: con Firestore no hay remoteId):
+// - Si todavía era una creación pendiente, sigue siéndolo.
+// - En cualquier otro caso (SYNCED o FAILED) queda como actualización pendiente.
+// Para Firestore las dos se envían con el mismo upsert; la distinción es informativa.
 fun ReminderEntity.estadoTrasEdicionLocal(): SyncStatus =
-    if (remoteId == null) SyncStatus.PENDING_CREATE else SyncStatus.PENDING_UPDATE
+    if (syncStatus == SyncStatus.PENDING_CREATE) SyncStatus.PENDING_CREATE else SyncStatus.PENDING_UPDATE

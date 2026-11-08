@@ -92,15 +92,13 @@ class LocalFirstReminderRepository(
     override suspend fun eliminar(id: Long) {
         val uid = uidRequerido()
         val actual = dao.getById(uid, id) ?: return
-        if (actual.remoteId == null) {
-            // Nunca llegó al servidor: no hay nada que avisarle, se borra ya
-            dao.deleteById(uid, actual.id)
-        } else {
-            // Existe en el servidor: borrado lógico (PENDING_DELETE). La UI lo oculta al
-            // instante y la fila se elimina de verdad cuando el servidor confirme el DELETE.
-            dao.update(actual.copy(syncStatus = SyncStatus.PENDING_DELETE, updatedAt = reloj()))
-            syncManager.solicitarSync()
-        }
+        if (actual.syncStatus == SyncStatus.PENDING_DELETE) return
+        // SIEMPRE borrado lógico: no se puede saber si el documento ya llegó a la nube
+        // (con Firestore no hay remoteId, y un upsert pudo llegar sin confirmarse).
+        // La UI lo oculta al instante; la fila se borra de verdad cuando la nube confirme
+        // el delete (borrar un documento que no existe también es un éxito).
+        dao.update(actual.copy(syncStatus = SyncStatus.PENDING_DELETE, updatedAt = reloj()))
+        syncManager.solicitarSync()
     }
 
     // --- Sincronización ---

@@ -31,7 +31,7 @@ class LocalFirstReminderRepositoryTest {
     // Sin conexión: los cambios quedan solo en Room (no se dispara ningún sync)
     private val syncManager = SyncManager(
         dao = dao,
-        remoto = FakeRemoteDataSource(),
+        nube = FakeCloudReminderDataSource(),
         conectividad = FakeConnectivityObserver(conectado = false),
         appScope = CoroutineScope(Dispatchers.Unconfined),
         enTransaccion = { it() },
@@ -81,27 +81,30 @@ class LocalFirstReminderRepositoryTest {
     @Test
     fun editarAlgoSincronizadoQuedaPendienteDeActualizar() = runBlocking {
         val id = repositorio.crear(nuevo)
-        dao.update(dao.getById(ana.uid, id)!!.copy(remoteId = "42", syncStatus = SyncStatus.SYNCED))
+        dao.update(dao.getById(ana.uid, id)!!.copy(syncStatus = SyncStatus.SYNCED))
 
         repositorio.cambiarCompletado(id, true)
 
         val fila = dao.getById(ana.uid, id)!!
         assertEquals(SyncStatus.PENDING_UPDATE, fila.syncStatus)
         assertTrue(fila.isCompleted)
-        assertEquals("42", fila.remoteId)
+        assertNull(fila.remoteId)
     }
 
     @Test
-    fun eliminarSinRemoteIdBorraLaFila() = runBlocking {
+    fun eliminarAlgoNuncaSincronizadoTambienEsBorradoLogico() = runBlocking {
+        // Con Firestore no hay remoteId: no se puede saber si el upsert llegó a la nube,
+        // así que el borrado siempre queda pendiente de confirmar
         val id = repositorio.crear(nuevo)
         repositorio.eliminar(id)
-        assertNull(dao.getById(ana.uid, id))
+        assertEquals(SyncStatus.PENDING_DELETE, dao.getById(ana.uid, id)!!.syncStatus)
+        assertTrue(repositorio.observarRecordatorios().first().isEmpty())
     }
 
     @Test
-    fun eliminarConRemoteIdEsBorradoLogicoYSeOcultaEnLaUi() = runBlocking {
+    fun eliminarAlgoSincronizadoEsBorradoLogicoYSeOcultaEnLaUi() = runBlocking {
         val id = repositorio.crear(nuevo)
-        dao.update(dao.getById(ana.uid, id)!!.copy(remoteId = "42", syncStatus = SyncStatus.SYNCED))
+        dao.update(dao.getById(ana.uid, id)!!.copy(syncStatus = SyncStatus.SYNCED))
 
         repositorio.eliminar(id)
 

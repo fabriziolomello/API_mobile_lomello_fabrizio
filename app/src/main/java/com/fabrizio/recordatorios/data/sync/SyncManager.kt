@@ -1,14 +1,13 @@
 package com.fabrizio.recordatorios.data.sync
 
+import com.fabrizio.recordatorios.data.cloud.CloudException
+import com.fabrizio.recordatorios.data.cloud.CloudReminder
+import com.fabrizio.recordatorios.data.cloud.CloudReminderDataSource
+import com.fabrizio.recordatorios.data.cloud.toCloudReminder
+import com.fabrizio.recordatorios.data.cloud.toEntity
 import com.fabrizio.recordatorios.data.local.ReminderDao
 import com.fabrizio.recordatorios.data.local.ReminderEntity
 import com.fabrizio.recordatorios.data.local.SyncStatus
-import com.fabrizio.recordatorios.data.mapper.actualizarDesde
-import com.fabrizio.recordatorios.data.mapper.toDto
-import com.fabrizio.recordatorios.data.mapper.toEntity
-import com.fabrizio.recordatorios.data.remote.DataResult
-import com.fabrizio.recordatorios.data.remote.ReminderDto
-import com.fabrizio.recordatorios.data.remote.ReminderRemoteDataSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,13 +17,17 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import java.util.concurrent.atomic.AtomicBoolean
 
-// Sincroniza Room con el servidor en dos pasos:
-//   1. PUSH: envía las operaciones pendientes (crear / actualizar / borrar).
-//   2. PULL: baja la lista del servidor y la mezcla en Room sin duplicar.
+// Sincroniza Room con Firestore (users/{uid}/reminders/{clientId}) en dos pasos:
+//   1. PUSH: envía las operaciones pendientes del usuario (upsert / delete).
+//   2. PULL: baja todos sus documentos y los mezcla en Room sin duplicar.
 // Room sigue siendo la fuente de verdad: la UI se entera de todo por los Flow del DAO.
+//
+// Aislamiento por usuario: el uid se captura al empezar. Después de CADA espera a la nube
+// y antes de escribir en Room se verifica que la sesión siga siendo ese uid; si cambió
+// (logout o cambio de cuenta), se aborta sin escribir.
 class SyncManager(
     private val dao: ReminderDao,
-    private val remoto: ReminderRemoteDataSource,
+    private val nube: CloudReminderDataSource,
     private val conectividad: ConnectivityObserver,
     // Scope de la aplicación: un sync no se corta porque el usuario cambie de pantalla
     private val appScope: CoroutineScope,
@@ -32,8 +35,7 @@ class SyncManager(
     private val enTransaccion: suspend (suspend () -> Unit) -> Unit,
     // Guarda en DataStore la hora del último sync exitoso
     private val registrarSincronizacion: suspend (Long) -> Unit,
-    // uid de la sesión actual (null = sin sesión). Cada vuelta trabaja SOLO con las filas
-    // de ese usuario; lo que baja del servidor se guarda a su nombre.
+    // uid de la sesión actual (null = sin sesión)
     private val usuarioActual: suspend () -> String?,
     private val reloj: () -> Long = System::currentTimeMillis
 ) {
@@ -50,8 +52,9 @@ class SyncManager(
     private val _estado = MutableStateFlow<EstadoSincronizacion>(EstadoSincronizacion.Inactivo)
     val estado: StateFlow<EstadoSincronizacion> = _estado.asStateFlow()
 
-    // Se llama una vez al iniciar la app: cada vez que vuelve la red, sincroniza.
-    // (El Flow emite true al arrancar si hay conexión, así también sincroniza al abrir la app.)
+    // Se llama al iniciar sesión (o al abrir la app con sesión, ver AppContainer):
+    // cada vez que hay red, sincroniza. El Flow emite true al suscribirse si hay conexión,
+    // así que este es también el PRIMER sync de la sesión.
     fun iniciar() {
         appScope.launch {
             conectividad.estaConectado
@@ -74,183 +77,172 @@ class SyncManager(
         }
         try {
             _estado.value = EstadoSincronizacion.Sincronizando
-            var resultado: SyncResult
-            do {
-                otraVuelta.set(false)
-                resultado = unaVuelta()
-            } while (otraVuelta.get() && resultado is SyncResult.Exito)
-
+            // uid capturado UNA vez: todas las vueltas trabajan para este usuario
+            val uid = usuarioActual()?.takeIf { it.isNotBlank() }
+            val resultado = if (uid == null) {
+                SyncResult.SinSesion
+            } else {
+                var vuelta: SyncResult
+                do {
+                    otraVuelta.set(false)
+                    vuelta = unaVuelta(uid)
+                } while (otraVuelta.get() && vuelta is SyncResult.Exito)
+                vuelta
+            }
             _estado.value = estadoTras(resultado)
             return resultado
         } finally {
+            // Si el sync se canceló a mitad (logout), el estado no puede quedar en
+            // Sincronizando: CierreSesion espera a que deje de estarlo antes de borrar Room.
+            if (_estado.value == EstadoSincronizacion.Sincronizando) {
+                _estado.value = EstadoSincronizacion.Inactivo
+            }
             mutex.unlock()
         }
     }
 
-    private fun estadoTras(resultado: SyncResult): EstadoSincronizacion = when {
-        resultado is SyncResult.Fallo ->
-            EstadoSincronizacion.Error(resultado.error.mensajeUsuario, reloj())
-        resultado is SyncResult.Exito && resultado.rechazados > 0 -> EstadoSincronizacion.Error(
-            "${resultado.rechazados} cambio(s) fueron rechazados por el servidor. Tocá Reintentar.",
-            reloj()
-        )
-        else -> EstadoSincronizacion.Inactivo
+    private fun estadoTras(resultado: SyncResult): EstadoSincronizacion = when (resultado) {
+        is SyncResult.Fallo -> EstadoSincronizacion.Error(resultado.error.mensajeUsuario, reloj())
+        SyncResult.SinConexion -> EstadoSincronizacion.Error(MENSAJE_SIN_CONEXION, reloj())
+        is SyncResult.Exito ->
+            if (resultado.rechazados > 0) {
+                EstadoSincronizacion.Error(
+                    "${resultado.rechazados} cambio(s) fueron rechazados por el servidor. Tocá Reintentar.",
+                    reloj()
+                )
+            } else {
+                EstadoSincronizacion.Inactivo
+            }
+        SyncResult.EnCurso, SyncResult.SinSesion -> EstadoSincronizacion.Inactivo
     }
 
-    private suspend fun unaVuelta(): SyncResult {
-        // Se lee el uid al empezar cada vuelta: toda la vuelta usa el mismo usuario.
-        // (Al cerrar sesión, CierreSesion cancela el sync antes de borrar la base.)
-        val userId = usuarioActual()?.takeIf { it.isNotBlank() } ?: return SyncResult.SinSesion
+    // La sesión sigue siendo la del usuario con el que empezó el sync
+    private suspend fun sigueLaSesion(uid: String): Boolean = usuarioActual() == uid
 
-        // --- 1. PUSH ---
+    private suspend fun unaVuelta(uid: String): SyncResult {
+        // --- 1. PUSH (siempre antes del pull) ---
         var enviados = 0
         var rechazados = 0
-        for (pendiente in dao.getPendingSync(userId)) {
-            when (val resultado = enviar(userId, pendiente)) {
-                is DataResult.Exito -> enviados++
-                is DataResult.Error ->
-                    if (resultado.recuperable) {
-                        // Red caída, timeout o 5xx: se corta el sync; todo sigue pendiente
-                        // en Room y se reintenta en el próximo evento (reconexión o manual).
-                        return SyncResult.Fallo(resultado)
-                    } else {
-                        // 4xx: reenviar lo mismo no sirve. Queda FAILED para reintento manual
-                        // (salvo que el usuario lo haya vuelto a editar mientras tanto).
-                        dao.markFailed(userId, pendiente.id, pendiente.updatedAt)
-                        rechazados++
-                    }
+        for (pendiente in dao.getPendingSync(uid)) {
+            val error = enviar(uid, pendiente)
+            // Terminó la espera a la nube: antes de tocar Room, la sesión tiene que ser la misma
+            if (!sigueLaSesion(uid)) return SyncResult.SinSesion
+            when (error) {
+                null -> {
+                    confirmarEnvio(uid, pendiente)
+                    enviados++
+                }
+                // Sin red: se corta acá. Esta fila y las que faltan quedan como estaban
+                // (pendientes, sin FAILED). Reintentar es seguro: el ID del documento es el
+                // clientId, así que reenviar pisa el mismo documento y no duplica.
+                is CloudException.SinConexion -> return SyncResult.SinConexion
+                // La sesión no vale para Firestore: no es culpa de la fila, se corta todo
+                is CloudException.NoAutenticado -> return SyncResult.Fallo(error)
+                // Rechazo de esta fila: se marca y se sigue con las demás
+                is CloudException.PermissionDenied, is CloudException.Desconocida -> {
+                    rechazar(uid, pendiente)
+                    rechazados++
+                }
             }
         }
 
         // --- 2. PULL ---
-        val remotos = when (val resultado = remoto.obtenerTodos()) {
-            is DataResult.Exito -> resultado.datos
-            is DataResult.Error -> return SyncResult.Fallo(resultado)
+        val documentos: List<CloudReminder> = try {
+            nube.fetchAll(uid)
+        } catch (e: CloudException) {
+            // Si el pull falla no se toca nada local
+            return if (e is CloudException.SinConexion) SyncResult.SinConexion else SyncResult.Fallo(e)
         }
-        val recibidos = mezclar(userId, remotos)
+        if (!sigueLaSesion(uid)) return SyncResult.SinSesion
+        val recibidos = mezclar(uid, documentos)
 
         registrarSincronizacion(reloj())
         return SyncResult.Exito(enviados, recibidos, rechazados)
     }
 
-    // Envía una operación pendiente. Cada rama confirma en Room SIN crear filas nuevas.
-    private suspend fun enviar(userId: String, entidad: ReminderEntity): DataResult<Unit> = when (entidad.syncStatus) {
-        SyncStatus.PENDING_CREATE -> enviarCreacion(userId, entidad)
-        SyncStatus.PENDING_UPDATE -> enviarActualizacion(userId, entidad)
-        SyncStatus.PENDING_DELETE -> enviarBorrado(userId, entidad)
-        SyncStatus.SYNCED, SyncStatus.FAILED -> DataResult.Exito(Unit) // no se reenvían
-    }
-
-    private suspend fun enviarCreacion(userId: String, entidad: ReminderEntity): DataResult<Unit> {
-        // IDEMPOTENCIA: antes de crear se pregunta si el servidor ya tiene este clientId.
-        // Pasa si un POST anterior llegó pero la respuesta se perdió (timeout, corte de red).
-        val existente = when (val busqueda = remoto.buscarPorClientId(entidad.clientId)) {
-            is DataResult.Exito -> busqueda.datos
-            is DataResult.Error -> return busqueda
-        }
-        val confirmado: ReminderDto = when (
-            val resultado = if (existente?.id != null) {
-                // Ya existe: se adopta ese registro y se le envían los datos locales más nuevos
-                remoto.actualizar(existente.id, entidad.toDto().copy(id = existente.id))
-            } else {
-                remoto.crear(entidad.toDto())
+    // Envía una operación pendiente. Devuelve null si la nube la confirmó.
+    // (CancellationException no es CloudException: se propaga y cancela el sync.)
+    private suspend fun enviar(uid: String, entidad: ReminderEntity): CloudException? =
+        try {
+            when (entidad.syncStatus) {
+                SyncStatus.PENDING_CREATE, SyncStatus.PENDING_UPDATE ->
+                    nube.upsert(uid, entidad.toCloudReminder())
+                SyncStatus.PENDING_DELETE -> nube.delete(uid, entidad.clientId)
+                SyncStatus.SYNCED, SyncStatus.FAILED -> Unit // no se reenvían
             }
-        ) {
-            is DataResult.Exito -> resultado.datos
-            is DataResult.Error -> return resultado
+            null
+        } catch (e: CloudException) {
+            e
         }
-        val remoteId = confirmado.id ?: existente?.id ?: return DataResult.Desconocido(
-            IllegalStateException("El servidor no devolvió un id")
-        )
-        confirmarCreacion(userId, entidad, remoteId)
-        return DataResult.Exito(Unit)
-    }
 
-    // Guarda el remoteId en la MISMA fila (por id local). Nunca inserta.
-    private suspend fun confirmarCreacion(userId: String, entidad: ReminderEntity, remoteId: String) {
-        if (dao.markSynced(userId, entidad.id, remoteId, entidad.updatedAt) > 0) return
-        // La fila cambió durante el envío: se guarda el remoteId y queda como actualización
-        if (dao.assignRemoteId(userId, entidad.id, remoteId) > 0) return
-        // La fila ya no existe (el usuario la borró mientras viajaba el POST):
-        // se borra también en el servidor para no dejar un registro huérfano.
-        remoto.eliminar(remoteId)
-    }
-
-    private suspend fun enviarActualizacion(userId: String, entidad: ReminderEntity): DataResult<Unit> {
-        val remoteId = entidad.remoteId ?: return enviarCreacion(userId, entidad)
-        return when (val resultado = remoto.actualizar(remoteId, entidad.toDto())) {
-            is DataResult.Exito -> {
-                // Si el usuario volvió a editar mientras tanto, sigue pendiente (0 filas)
-                dao.markSynced(userId, entidad.id, remoteId, entidad.updatedAt)
-                DataResult.Exito(Unit)
-            }
-            is DataResult.Error ->
-                if (resultado is DataResult.ErrorCliente && resultado.codigo == 404) {
-                    // El servidor ya no lo tiene (lo borraron desde el panel). Se vuelve
-                    // a crear; la búsqueda por clientId evita duplicarlo si ya estaba.
-                    dao.resetToPendingCreate(userId, entidad.id)
-                    enviarCreacion(userId, entidad.copy(remoteId = null, syncStatus = SyncStatus.PENDING_CREATE))
-                } else {
-                    resultado
-                }
+    // Confirma en la MISMA fila; nunca inserta. Comparar updated_at con el valor enviado
+    // evita pisar una edición hecha mientras viajaba la petición (queda pendiente).
+    private suspend fun confirmarEnvio(uid: String, entidad: ReminderEntity) {
+        when (entidad.syncStatus) {
+            SyncStatus.PENDING_DELETE -> dao.deleteIfPendingDelete(uid, entidad.id)
+            else -> dao.markSynced(uid, entidad.id, entidad.updatedAt)
         }
     }
 
-    private suspend fun enviarBorrado(userId: String, entidad: ReminderEntity): DataResult<Unit> {
-        val remoteId = entidad.remoteId
-        if (remoteId != null) {
-            // eliminar() ya trata el 404 como éxito (DELETE idempotente)
-            val resultado = remoto.eliminar(remoteId)
-            if (resultado is DataResult.Error) return resultado
+    private suspend fun rechazar(uid: String, entidad: ReminderEntity) {
+        when (entidad.syncStatus) {
+            // Un borrado rechazado NO se marca FAILED: FAILED es visible en la lista y el
+            // reintento lo convertiría en upsert, resucitando el recordatorio. Queda
+            // PENDING_DELETE (oculto) y se vuelve a intentar en el próximo sync.
+            SyncStatus.PENDING_DELETE -> Unit
+            // Lógica de reintento existente: FAILED hasta que el usuario toque Reintentar
+            // (salvo que lo haya vuelto a editar mientras tanto)
+            else -> dao.markFailed(uid, entidad.id, entidad.updatedAt)
         }
-        dao.deleteIfPendingDelete(userId, entidad.id)
-        return DataResult.Exito(Unit)
     }
 
-    // Mezcla la lista del servidor en Room. Devuelve cuántas filas se insertaron o cambiaron.
-    // Regla: los cambios locales pendientes ganan (se enviarán en el próximo push);
-    // las filas ya sincronizadas toman los datos del servidor.
-    // Todo se busca y se inserta a nombre de userId. MockAPI no guarda dueño: lo que baja
-    // queda asignado al usuario de la sesión actual.
-    private suspend fun mezclar(userId: String, remotos: List<ReminderDto>): Int {
+    // Mezcla los documentos de la nube en Room. Devuelve cuántas filas se insertaron,
+    // cambiaron o se borraron. Siempre se busca por client_id antes de insertar:
+    // nunca se inserta a ciegas, así que no puede haber duplicados.
+    //
+    // CONFLICTOS: gana el updatedAt mayor. LÍMITE CONOCIDO: updatedAt sale del reloj de
+    // cada dispositivo; si un reloj está adelantado o atrasado, sus cambios ganan o pierden
+    // de más. Ante empate gana lo local (se reenvía en el próximo push).
+    private suspend fun mezclar(uid: String, documentos: List<CloudReminder>): Int {
         var cambios = 0
         enTransaccion {
-            val ahora = reloj()
-            val idsRemotos = mutableSetOf<String>()
-            for (dto in remotos) {
-                val nueva = dto.toEntity(userId, ahora) ?: continue // DTO inválido: se descarta
-                val remoteId = nueva.remoteId ?: continue
-                idsRemotos += remoteId
-
-                // Se busca primero por remoteId y después por clientId: así un registro
-                // que el servidor ya tiene nunca se inserta dos veces.
-                val local = dao.getByRemoteId(userId, remoteId) ?: dao.getByClientId(userId, nueva.clientId)
+            val enLaNube = HashSet<String>(documentos.size)
+            for (doc in documentos) {
+                enLaNube += doc.clientId
+                val local = dao.getByClientId(uid, doc.clientId)
                 when {
+                    // No existe local: se inserta como SYNCED
                     local == null -> {
-                        dao.insert(nueva)
+                        dao.insert(doc.toEntity(uid))
                         cambios++
                     }
-                    // Creación local cuyo POST llegó al servidor pero no se confirmó:
-                    // se adopta el remoteId y los datos locales se enviarán como actualización.
-                    local.remoteId == null -> dao.assignRemoteId(userId, local.id, remoteId)
-                    local.syncStatus == SyncStatus.SYNCED -> {
-                        val actualizada = local.actualizarDesde(dto)
-                        if (actualizada != local) {
-                            dao.update(actualizada)
-                            cambios++
-                        }
+                    // Gana el borrado local: no se resucita (el push lo borrará en la nube)
+                    local.syncStatus == SyncStatus.PENDING_DELETE -> Unit
+                    // SYNCED, PENDING_CREATE/UPDATE o FAILED con una versión más nueva en la
+                    // nube: se pisa con la de la nube y queda SYNCED (misma fila, mismo id)
+                    doc.updatedAt > local.updatedAt -> {
+                        dao.update(doc.toEntity(uid).copy(id = local.id))
+                        cambios++
                     }
-                    else -> Unit // pendiente o con error: se respeta el cambio local
+                    // Lo local es igual o más nuevo: si estaba pendiente sigue pendiente
+                    // y se sube en el próximo push
+                    else -> Unit
                 }
             }
-            // Filas sincronizadas que ya no están en el servidor: se borraron allá
-            dao.getWithRemoteId(userId)
-                .filter { it.syncStatus == SyncStatus.SYNCED && it.remoteId !in idsRemotos }
+            // Filas SYNCED que ya no están en la nube: se borraron desde otro dispositivo.
+            // Solo SYNCED: nunca se borran pendientes ni FAILED (tienen cambios sin subir).
+            dao.getSynced(uid)
+                .filter { it.clientId !in enLaNube }
                 .forEach {
-                    dao.deleteById(userId, it.id)
+                    dao.deleteById(uid, it.id)
                     cambios++
                 }
         }
         return cambios
+    }
+
+    private companion object {
+        const val MENSAJE_SIN_CONEXION =
+            "Sin conexión. Tus cambios quedan guardados y se enviarán al reconectar."
     }
 }

@@ -1,20 +1,26 @@
 package com.fabrizio.recordatorios.data.sync
 
-import com.fabrizio.recordatorios.data.remote.DataResult
+import com.fabrizio.recordatorios.data.cloud.CloudException
 
-// Resultado de una vuelta completa de sincronización
+// Resultado de una sincronización completa
 sealed interface SyncResult {
-    // rechazados: operaciones que el servidor rechazó con 4xx (quedan FAILED)
+    // rechazados: operaciones que la nube rechazó (PermissionDenied / Desconocida)
     data class Exito(val enviados: Int, val recibidos: Int, val rechazados: Int) : SyncResult
 
     // Ya había una sincronización en curso: no se lanzó otra en paralelo
     data object EnCurso : SyncResult
 
-    // No hay usuario logueado: no se envía ni se baja nada (no hay a quién asignar las filas)
+    // No hay usuario logueado, o la sesión cambió durante el sync: no se escribió nada
+    // más en Room (no se mezclan datos entre cuentas)
     data object SinSesion : SyncResult
 
-    // Falla recuperable (red, timeout, 5xx): los cambios siguen pendientes en Room
-    data class Fallo(val error: DataResult.Error) : SyncResult
+    // Sin red o sin respuesta a tiempo: se cortó el sync y TODO lo que faltaba sigue
+    // pendiente (no se marca FAILED). Se reintenta en el próximo disparador.
+    data object SinConexion : SyncResult
+
+    // Falla que impide seguir (pull rechazado, sesión inválida para Firestore).
+    // Los datos locales quedan intactos.
+    data class Fallo(val error: CloudException) : SyncResult
 }
 
 // Estado observable por la UI
