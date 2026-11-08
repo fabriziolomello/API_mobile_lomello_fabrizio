@@ -8,6 +8,8 @@ plugins {
     // KSP: procesa las anotaciones de Room en compilación (reemplaza a kapt)
     alias(libs.plugins.ksp)
     alias(libs.plugins.androidx.room)
+    // Firebase: lee app/google-services.json (no se sube a git)
+    alias(libs.plugins.google.services)
 }
 
 // URL base del servicio remoto, leída de local.properties (que NO se sube a git).
@@ -91,6 +93,10 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging.interceptor)
     implementation(libs.kotlinx.serialization.json)
+    // Actividad 4: Firebase (versiones definidas por el BoM)
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.auth)
+    implementation(libs.firebase.firestore)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
