@@ -3,6 +3,9 @@ package com.fabrizio.recordatorios
 import com.fabrizio.recordatorios.data.auth.AuthError
 import com.fabrizio.recordatorios.data.auth.AuthRepository
 import com.fabrizio.recordatorios.data.auth.AuthUser
+import com.fabrizio.recordatorios.data.cloud.CloudException
+import com.fabrizio.recordatorios.data.cloud.CloudReminder
+import com.fabrizio.recordatorios.data.cloud.CloudReminderDataSource
 import com.fabrizio.recordatorios.data.local.ReminderDao
 import com.fabrizio.recordatorios.data.local.ReminderEntity
 import com.fabrizio.recordatorios.data.local.SyncStatus
@@ -153,6 +156,63 @@ class FakeRemoteDataSource : ReminderRemoteDataSource {
         falla?.let { return it }
         servidor.removeAll { it.id == remoteId }
         return DataResult.Exito(Unit)
+    }
+}
+
+// Nube falsa en memoria: documentos por usuario (uid -> clientId -> documento),
+// igual que la ruta users/{uid}/reminders/{clientId}. Permite simular fallas.
+class FakeCloudReminderDataSource : CloudReminderDataSource {
+    private val porUsuario = mutableMapOf<String, MutableMap<String, CloudReminder>>()
+    fun documentos(uid: String): MutableMap<String, CloudReminder> = porUsuario.getOrPut(uid) { linkedMapOf() }
+
+    var upserts = 0
+        private set
+    var deletes = 0
+        private set
+
+    // Si no es null, TODAS las llamadas fallan con este error (por ejemplo SinConexion)
+    var falla: CloudException? = null
+
+    // Fallas solo para ciertos documentos (por ejemplo PermissionDenied en una fila)
+    val fallaPorClientId = mutableMapOf<String, CloudException>()
+
+    // La escritura llega a la nube pero la app recibe SinConexion (respuesta perdida / timeout)
+    var perderRespuesta = false
+
+    // Permite frenar una llamada a mitad de camino (prueba del Mutex y de cancelación)
+    var bloqueo: CompletableDeferred<Unit>? = null
+
+    // Se ejecuta DESPUÉS de cada operación exitosa en la nube y antes de devolver el control
+    // (simula, por ejemplo, un cambio de sesión mientras se esperaba la respuesta)
+    var despuesDeOperar: suspend (operacion: String) -> Unit = {}
+
+    private suspend fun antes(clientId: String? = null) {
+        bloqueo?.await()
+        falla?.let { throw it }
+        clientId?.let { id -> fallaPorClientId[id]?.let { throw it } }
+    }
+
+    override suspend fun upsert(uid: String, reminder: CloudReminder) {
+        antes(reminder.clientId)
+        upserts++
+        documentos(uid)[reminder.clientId] = reminder
+        despuesDeOperar("upsert")
+        if (perderRespuesta) throw CloudException.SinConexion()
+    }
+
+    override suspend fun delete(uid: String, clientId: String) {
+        antes(clientId)
+        deletes++
+        documentos(uid).remove(clientId)
+        despuesDeOperar("delete")
+        if (perderRespuesta) throw CloudException.SinConexion()
+    }
+
+    override suspend fun fetchAll(uid: String): List<CloudReminder> {
+        antes()
+        val copia = documentos(uid).values.toList()
+        despuesDeOperar("fetchAll")
+        return copia
     }
 }
 
