@@ -44,12 +44,16 @@ class FirestoreReminderDataSource(
         conTimeout { coleccion(uid).document(clientId).delete().await() }
     }
 
-    override suspend fun fetchAll(uid: String): List<CloudReminder> = conTimeout {
-        coleccion(uid).get(Source.SERVER).await().documents.mapNotNull { documento ->
-            cloudReminderDesdeDocumento(documento.id, documento.data.orEmpty()) { motivo ->
+    override suspend fun fetchAll(uid: String): CloudFetchResult = conTimeout {
+        val validos = mutableListOf<CloudReminder>()
+        val invalidos = mutableSetOf<String>()
+        for (documento in coleccion(uid).get(Source.SERVER).await().documents) {
+            val reminder = cloudReminderDesdeDocumento(documento.id, documento.data.orEmpty()) { motivo ->
                 Log.w(TAG, motivo)
             }
+            if (reminder != null) validos += reminder else invalidos += documento.id
         }
+        CloudFetchResult(validos, invalidos)
     }
 
     // Aplica el timeout y traduce toda falla a CloudException.

@@ -1,6 +1,7 @@
 package com.fabrizio.recordatorios
 
 import android.content.Context
+import android.util.Log
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
@@ -79,7 +80,8 @@ class AppContainer(context: Context) {
             enTransaccion = { bloque -> database.withTransaction { bloque() } },
             registrarSincronizacion = preferencias::guardarUltimaSincronizacion,
             // El sync trabaja solo con las filas del usuario logueado
-            usuarioActual = { autenticacion.currentUser.first()?.uid }
+            usuarioActual = { autenticacion.currentUser.first()?.uid },
+            log = { mensaje -> Log.w("SyncManager", mensaje) }
         )
     }
 

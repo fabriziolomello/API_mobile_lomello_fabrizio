@@ -1,7 +1,7 @@
 package com.fabrizio.recordatorios.data.sync
 
 import com.fabrizio.recordatorios.data.cloud.CloudException
-import com.fabrizio.recordatorios.data.cloud.CloudReminder
+import com.fabrizio.recordatorios.data.cloud.CloudFetchResult
 import com.fabrizio.recordatorios.data.cloud.CloudReminderDataSource
 import com.fabrizio.recordatorios.data.cloud.toCloudReminder
 import com.fabrizio.recordatorios.data.cloud.toEntity
@@ -18,9 +18,20 @@ import kotlinx.coroutines.sync.Mutex
 import java.util.concurrent.atomic.AtomicBoolean
 
 // Sincroniza Room con Firestore (users/{uid}/reminders/{clientId}) en dos pasos:
-//   1. PUSH: envía las operaciones pendientes del usuario (upsert / delete).
-//   2. PULL: baja todos sus documentos y los mezcla en Room sin duplicar.
+//   1. PULL: baja todos sus documentos y los mezcla en Room resolviendo conflictos
+//      (gana el updatedAt mayor). Así, una versión más nueva de otro dispositivo se
+//      aplica ANTES de subir nada y el push no la pisa.
+//   2. PUSH: sube lo que quedó pendiente después del pull (lo que ganó lo local).
 // Room sigue siendo la fuente de verdad: la UI se entera de todo por los Flow del DAO.
+//
+// LÍMITES CONOCIDOS de este esquema (sin transacciones en la nube):
+//  - Otro dispositivo puede escribir ENTRE el pull y el push: ese cambio no se vio en el
+//    pull y el push lo pisa con la versión local (el próximo pull de ese otro dispositivo
+//    baja la versión que quedó).
+//  - Edición local contra borrado remoto: si el documento se borró en otro dispositivo
+//    pero acá hay una edición pendiente, gana la edición: la fila no es SYNCED, así que el
+//    pull no la borra, y el push vuelve a crear el documento.
+//  - updatedAt sale del reloj de cada dispositivo (ver mezclar).
 //
 // Aislamiento por usuario: el uid se captura al empezar. Después de CADA espera a la nube
 // y antes de escribir en Room se verifica que la sesión siga siendo ese uid; si cambió
@@ -37,7 +48,9 @@ class SyncManager(
     private val registrarSincronizacion: suspend (Long) -> Unit,
     // uid de la sesión actual (null = sin sesión)
     private val usuarioActual: suspend () -> String?,
-    private val reloj: () -> Long = System::currentTimeMillis
+    private val reloj: () -> Long = System::currentTimeMillis,
+    // Avisos de diagnóstico (en la app, Log.w; en los tests se capturan o se ignoran)
+    private val log: (String) -> Unit = {}
 ) {
 
     // Single-flight: un solo sync a la vez. tryLock no espera: si ya hay uno
@@ -120,7 +133,19 @@ class SyncManager(
     private suspend fun sigueLaSesion(uid: String): Boolean = usuarioActual() == uid
 
     private suspend fun unaVuelta(uid: String): SyncResult {
-        // --- 1. PUSH (siempre antes del pull) ---
+        // --- 1. PULL ---
+        val snapshot: CloudFetchResult = try {
+            nube.fetchAll(uid)
+        } catch (e: CloudException) {
+            // Si el pull falla no se toca nada local y NO se hace el push: sin conocer la
+            // nube, subir a ciegas podría pisar una versión más nueva. Todo queda pendiente
+            // (sin FAILED) y se reintenta en el próximo sync.
+            return if (e is CloudException.SinConexion) SyncResult.SinConexion else SyncResult.Fallo(e)
+        }
+        if (!sigueLaSesion(uid)) return SyncResult.SinSesion
+        val recibidos = mezclar(uid, snapshot)
+
+        // --- 2. PUSH: lo que quedó pendiente después del pull ---
         var enviados = 0
         var rechazados = 0
         for (pendiente in dao.getPendingSync(uid)) {
@@ -145,16 +170,6 @@ class SyncManager(
                 }
             }
         }
-
-        // --- 2. PULL ---
-        val documentos: List<CloudReminder> = try {
-            nube.fetchAll(uid)
-        } catch (e: CloudException) {
-            // Si el pull falla no se toca nada local
-            return if (e is CloudException.SinConexion) SyncResult.SinConexion else SyncResult.Fallo(e)
-        }
-        if (!sigueLaSesion(uid)) return SyncResult.SinSesion
-        val recibidos = mezclar(uid, documentos)
 
         registrarSincronizacion(reloj())
         return SyncResult.Exito(enviados, recibidos, rechazados)
@@ -202,12 +217,12 @@ class SyncManager(
     //
     // CONFLICTOS: gana el updatedAt mayor. LÍMITE CONOCIDO: updatedAt sale del reloj de
     // cada dispositivo; si un reloj está adelantado o atrasado, sus cambios ganan o pierden
-    // de más. Ante empate gana lo local (se reenvía en el próximo push).
-    private suspend fun mezclar(uid: String, documentos: List<CloudReminder>): Int {
+    // de más. Ante empate gana lo local (se sube en el push que sigue).
+    private suspend fun mezclar(uid: String, snapshot: CloudFetchResult): Int {
         var cambios = 0
         enTransaccion {
-            val enLaNube = HashSet<String>(documentos.size)
-            for (doc in documentos) {
+            val enLaNube = HashSet<String>(snapshot.documentos.size)
+            for (doc in snapshot.documentos) {
                 enLaNube += doc.clientId
                 val local = dao.getByClientId(uid, doc.clientId)
                 when {
@@ -225,18 +240,25 @@ class SyncManager(
                         cambios++
                     }
                     // Lo local es igual o más nuevo: si estaba pendiente sigue pendiente
-                    // y se sube en el próximo push
+                    // y se sube en el push que viene a continuación
                     else -> Unit
                 }
             }
             // Filas SYNCED que ya no están en la nube: se borraron desde otro dispositivo.
             // Solo SYNCED: nunca se borran pendientes ni FAILED (tienen cambios sin subir).
-            dao.getSynced(uid)
-                .filter { it.clientId !in enLaNube }
-                .forEach {
-                    dao.deleteById(uid, it.id)
-                    cambios++
+            // Un documento que EXISTE pero el mapper descartó (inválido) no es un borrado:
+            // su fila local se deja como está.
+            for (fila in dao.getSynced(uid)) {
+                when (fila.clientId) {
+                    in enLaNube -> Unit
+                    in snapshot.idsInvalidos ->
+                        log("Documento ${fila.clientId} inválido en la nube: se conserva la fila local")
+                    else -> {
+                        dao.deleteById(uid, fila.id)
+                        cambios++
+                    }
                 }
+            }
         }
         return cambios
     }

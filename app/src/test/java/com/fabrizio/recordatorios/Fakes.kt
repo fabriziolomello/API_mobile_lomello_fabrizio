@@ -4,6 +4,7 @@ import com.fabrizio.recordatorios.data.auth.AuthError
 import com.fabrizio.recordatorios.data.auth.AuthRepository
 import com.fabrizio.recordatorios.data.auth.AuthUser
 import com.fabrizio.recordatorios.data.cloud.CloudException
+import com.fabrizio.recordatorios.data.cloud.CloudFetchResult
 import com.fabrizio.recordatorios.data.cloud.CloudReminder
 import com.fabrizio.recordatorios.data.cloud.CloudReminderDataSource
 import com.fabrizio.recordatorios.data.local.ReminderDao
@@ -111,6 +112,13 @@ class FakeCloudReminderDataSource : CloudReminderDataSource {
     // Si no es null, TODAS las llamadas fallan con este error (por ejemplo SinConexion)
     var falla: CloudException? = null
 
+    // Falla solo en fetchAll (el pull), las escrituras funcionan
+    var fallaFetch: CloudException? = null
+
+    // Documentos que existen en la nube pero el mapper descarta por inválidos (uid -> IDs)
+    private val invalidosPorUsuario = mutableMapOf<String, MutableSet<String>>()
+    fun idsInvalidos(uid: String): MutableSet<String> = invalidosPorUsuario.getOrPut(uid) { mutableSetOf() }
+
     // Fallas solo para ciertos documentos (por ejemplo PermissionDenied en una fila)
     val fallaPorClientId = mutableMapOf<String, CloudException>()
 
@@ -146,9 +154,10 @@ class FakeCloudReminderDataSource : CloudReminderDataSource {
         if (perderRespuesta) throw CloudException.SinConexion()
     }
 
-    override suspend fun fetchAll(uid: String): List<CloudReminder> {
+    override suspend fun fetchAll(uid: String): CloudFetchResult {
         antes()
-        val copia = documentos(uid).values.toList()
+        fallaFetch?.let { throw it }
+        val copia = CloudFetchResult(documentos(uid).values.toList(), idsInvalidos(uid).toSet())
         despuesDeOperar("fetchAll")
         return copia
     }

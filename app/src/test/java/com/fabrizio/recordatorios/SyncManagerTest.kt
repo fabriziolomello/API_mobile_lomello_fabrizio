@@ -39,6 +39,7 @@ class SyncManagerTest {
     private val conectividad = FakeConnectivityObserver(conectado = true)
     private var usuario: String? = ANA
     private var ahora = 5_000L
+    private val avisos = mutableListOf<String>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
 
     private val syncManager = SyncManager(
@@ -49,7 +50,8 @@ class SyncManagerTest {
         enTransaccion = { it() },
         registrarSincronizacion = prefs::guardarUltimaSincronizacion,
         usuarioActual = { usuario },
-        reloj = { ahora }
+        reloj = { ahora },
+        log = { avisos += it }
     )
 
     // Repositorio real sobre el mismo DAO (para crear/editar/borrar como lo hace la app)
@@ -210,52 +212,72 @@ class SyncManagerTest {
         assertEquals("Local", fila("vieja")!!.title)
     }
 
-    // --- Conflictos ---
-    // El push corre antes que el pull, así que un pendiente que ya existía se sube primero.
-    // El conflicto que resuelve el pull es el de un cambio local hecho MIENTRAS corría el
-    // sync (después de leer la lista de pendientes) contra un cambio en otro dispositivo.
+    // --- Conflictos (el pull corre ANTES que el push) ---
 
     @Test
-    fun conflictoGanaLaNubeSiSuUpdatedAtEsMayor() = runBlocking {
-        crearLocal("disparador")
-        val idB = crearLocal("b", status = SyncStatus.SYNCED, title = "Original")
-        nube.despuesDeOperar = { operacion ->
-            if (operacion == "upsert") {
-                // Durante el push: edición local de "b" (2000) y edición en otro dispositivo (3000)
-                dao.update(dao.getById(ANA, idB)!!.copy(title = "Local", updatedAt = 2_000L, syncStatus = SyncStatus.PENDING_UPDATE))
-                nube.documentos(ANA)["b"] = doc("b", title = "Otro dispositivo", updatedAt = 3_000L)
-            }
-        }
+    fun pendienteLocalMasViejoQueLaNubeGanaLaNubeYElPushNoLaPisa() = runBlocking {
+        crearLocal("c1", status = SyncStatus.PENDING_UPDATE, updatedAt = 2_000L, title = "Local viejo")
+        nube.documentos(ANA)["c1"] = doc("c1", title = "Otro dispositivo", updatedAt = 3_000L)
 
-        syncManager.sincronizar()
+        val resultado = syncManager.sincronizar()
 
-        val b = dao.getById(ANA, idB)!!
-        assertEquals("Otro dispositivo", b.title)
-        assertEquals(SyncStatus.SYNCED, b.syncStatus)
-        assertEquals(1, dao.filas.value.count { it.clientId == "b" })
+        assertEquals(SyncResult.Exito(enviados = 0, recibidos = 1, rechazados = 0), resultado)
+        assertEquals("Otro dispositivo", fila("c1")!!.title)
+        assertEquals(SyncStatus.SYNCED, fila("c1")!!.syncStatus)
+        // El push no subió la versión vieja: la nube conserva la suya
+        assertEquals(0, nube.upserts)
+        assertEquals("Otro dispositivo", nube.documentos(ANA)["c1"]!!.title)
+        assertEquals(1, dao.filas.value.size)
     }
 
     @Test
-    fun conflictoGanaElLocalSiSuUpdatedAtEsMayorYSeSubeEnElProximoPush() = runBlocking {
-        crearLocal("disparador")
-        val idB = crearLocal("b", status = SyncStatus.SYNCED, title = "Original")
-        nube.despuesDeOperar = { operacion ->
-            if (operacion == "upsert" && nube.upserts == 1) {
-                dao.update(dao.getById(ANA, idB)!!.copy(title = "Local", updatedAt = 4_000L, syncStatus = SyncStatus.PENDING_UPDATE))
-                nube.documentos(ANA)["b"] = doc("b", title = "Otro dispositivo", updatedAt = 3_000L)
-            }
-        }
+    fun pendienteLocalMasNuevoQueLaNubeSeSube() = runBlocking {
+        crearLocal("c1", status = SyncStatus.PENDING_UPDATE, updatedAt = 4_000L, title = "Local nuevo")
+        nube.documentos(ANA)["c1"] = doc("c1", title = "Otro dispositivo", updatedAt = 3_000L)
+
+        val resultado = syncManager.sincronizar()
+
+        assertEquals(SyncResult.Exito(enviados = 1, recibidos = 0, rechazados = 0), resultado)
+        assertEquals("Local nuevo", nube.documentos(ANA)["c1"]!!.title)
+        assertEquals(4_000L, nube.documentos(ANA)["c1"]!!.updatedAt)
+        assertEquals(SyncStatus.SYNCED, fila("c1")!!.syncStatus)
+    }
+
+    @Test
+    fun empateDeUpdatedAtGanaLoLocal() = runBlocking {
+        crearLocal("c1", status = SyncStatus.PENDING_UPDATE, updatedAt = 3_000L, title = "Local")
+        nube.documentos(ANA)["c1"] = doc("c1", title = "Nube", updatedAt = 3_000L)
 
         syncManager.sincronizar()
 
-        // Ganó lo local y quedó pendiente; como el cambio llegó durante el sync, el
-        // SyncManager no hizo otra vuelta sola: el próximo sync lo sube.
-        assertEquals("Local", dao.getById(ANA, idB)!!.title)
-        assertEquals(SyncStatus.PENDING_UPDATE, dao.getById(ANA, idB)!!.syncStatus)
+        assertEquals("Local", nube.documentos(ANA)["c1"]!!.title)
+        assertEquals("Local", fila("c1")!!.title)
+    }
+
+    @Test
+    fun edicionLocalContraBorradoRemotoGanaLaEdicion() = runBlocking {
+        // Límite documentado: el documento se borró en otro dispositivo, pero acá hay una
+        // edición pendiente. No es SYNCED, así que el pull no la borra y el push la recrea.
+        crearLocal("c1", status = SyncStatus.PENDING_UPDATE, title = "Editado acá")
 
         syncManager.sincronizar()
-        assertEquals("Local", nube.documentos(ANA)["b"]!!.title)
-        assertEquals(SyncStatus.SYNCED, dao.getById(ANA, idB)!!.syncStatus)
+
+        assertEquals(SyncStatus.SYNCED, fila("c1")!!.syncStatus)
+        assertEquals("Editado acá", nube.documentos(ANA)["c1"]!!.title)
+    }
+
+    @Test
+    fun documentoInvalidoEnLaNubeNoBorraLaFilaSynced() = runBlocking {
+        crearLocal("roto", status = SyncStatus.SYNCED, title = "Mi recordatorio")
+        crearLocal("borrado", status = SyncStatus.SYNCED)
+        nube.idsInvalidos(ANA) += "roto" // existe en la nube pero el mapper lo descartó
+
+        syncManager.sincronizar()
+
+        assertEquals("Mi recordatorio", fila("roto")!!.title) // no se tomó como borrado
+        assertEquals(SyncStatus.SYNCED, fila("roto")!!.syncStatus)
+        assertNull(fila("borrado")) // el que de verdad no está sí se borra
+        assertEquals(1, avisos.count { it.contains("roto") })
     }
 
     @Test
@@ -314,6 +336,22 @@ class SyncManagerTest {
     }
 
     @Test
+    fun siElPullFallaPorSinConexionNoHayPushYTodoQuedaPendiente() = runBlocking {
+        crearLocal("c1")
+        crearLocal("c2", status = SyncStatus.PENDING_DELETE)
+        nube.fallaFetch = CloudException.SinConexion()
+
+        val resultado = syncManager.sincronizar()
+
+        assertEquals(SyncResult.SinConexion, resultado)
+        assertEquals(0, nube.upserts) // las escrituras funcionarían, pero no se intentaron
+        assertEquals(0, nube.deletes)
+        assertEquals(SyncStatus.PENDING_CREATE, fila("c1")!!.syncStatus)
+        assertEquals(SyncStatus.PENDING_DELETE, fila("c2")!!.syncStatus)
+        assertTrue(dao.filas.value.none { it.syncStatus == SyncStatus.FAILED })
+    }
+
+    @Test
     fun siFallaElPullNoSeTocaNadaLocal() = runBlocking {
         crearLocal("local", status = SyncStatus.SYNCED)
         val antes = dao.filas.value
@@ -330,7 +368,8 @@ class SyncManagerTest {
     @Test
     fun cambioDeUsuarioDuranteElPushNoEscribeEnRoom() = runBlocking {
         crearLocal("c1")
-        nube.despuesDeOperar = { usuario = BETO } // la sesión cambia mientras se esperaba la nube
+        // La sesión cambia mientras se esperaba la respuesta del upsert (el pull ya pasó)
+        nube.despuesDeOperar = { operacion -> if (operacion == "upsert") usuario = BETO }
 
         val resultado = syncManager.sincronizar()
 

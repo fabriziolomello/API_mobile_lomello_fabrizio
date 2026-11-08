@@ -14,9 +14,18 @@ interface CloudReminderDataSource {
     // Borrar un documento que no existe no es un error (idempotente)
     suspend fun delete(uid: String, clientId: String)
 
-    // Siempre desde el servidor (nunca desde la caché). Los documentos inválidos se descartan.
-    suspend fun fetchAll(uid: String): List<CloudReminder>
+    // Siempre desde el servidor (nunca desde la caché). Los documentos inválidos no se
+    // devuelven como recordatorios, pero sí se informan sus IDs (ver CloudFetchResult).
+    suspend fun fetchAll(uid: String): CloudFetchResult
 }
+
+// Resultado de leer la colección completa de un usuario.
+// idsInvalidos: documentos que EXISTEN en la nube pero el mapper descartó (campo faltante
+// o tipo incorrecto). El pull los necesita para no confundirlos con documentos borrados.
+data class CloudFetchResult(
+    val documentos: List<CloudReminder>,
+    val idsInvalidos: Set<String> = emptySet()
+)
 
 // Fallas de la nube, ya clasificadas. La sincronización decide qué hacer según el tipo:
 //  - SinConexion: temporal, se corta el sync y todo queda pendiente para reintentar.
