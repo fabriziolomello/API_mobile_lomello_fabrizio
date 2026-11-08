@@ -48,6 +48,10 @@ interface ReminderRepository {
     suspend fun reintentarFallidos()
 }
 
-// El recordatorio pedido no existe (o ya fue eliminado)
+// El recordatorio pedido no existe (o ya fue eliminado, o es de otro usuario)
 class RecordatorioNoEncontradoException(id: Long) :
     IllegalStateException("No existe el recordatorio $id")
+
+// Se intentó escribir sin una sesión iniciada. Nunca se guarda una fila sin dueño.
+class SesionRequeridaException :
+    IllegalStateException("No hay una sesión iniciada: no se pueden guardar recordatorios sin usuario")

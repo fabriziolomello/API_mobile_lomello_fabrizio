@@ -24,12 +24,14 @@ fun ReminderEntity.toDto(): ReminderDto = ReminderDto(
 )
 
 // Registro que llega del servidor y no existe localmente.
+// userId: el usuario de la sesión que hizo el pull (MockAPI no guarda dueño).
 // Devuelve null si el DTO no es válido (sin id): se descarta en vez de romper.
-fun ReminderDto.toEntity(ahora: Long): ReminderEntity? {
+fun ReminderDto.toEntity(userId: String, ahora: Long): ReminderEntity? {
     val remoteId = id?.takeIf { it.isNotBlank() } ?: return null
     return ReminderEntity(
         // Registros creados fuera de la app (sin clientId) reciben uno derivado del id remoto
         clientId = clientId?.takeIf { it.isNotBlank() } ?: "remote-$remoteId",
+        userId = userId,
         remoteId = remoteId,
         title = title.ifBlank { "(Sin título)" },
         description = description?.takeIf { it.isNotBlank() },
@@ -44,7 +46,7 @@ fun ReminderDto.toEntity(ahora: Long): ReminderEntity? {
 }
 
 // Actualiza una fila SINCRONIZADA con los datos del servidor (gana el servidor),
-// conservando la identidad local (id, clientId).
+// conservando la identidad local (id, clientId, userId).
 fun ReminderEntity.actualizarDesde(dto: ReminderDto): ReminderEntity = copy(
     title = dto.title.ifBlank { title },
     description = dto.description?.takeIf { it.isNotBlank() },

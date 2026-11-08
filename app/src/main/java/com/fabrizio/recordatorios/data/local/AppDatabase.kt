@@ -5,14 +5,15 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
-import com.fabrizio.recordatorios.BuildConfig
 
-// Versionado: la entrega sale con la versión 1. Cada cambio de esquema
-// (columna nueva, índice, tabla) sube `version` y agrega una Migration explícita
-// con addMigrations(...). El JSON exportado en app/schemas permite compararlas.
+// Versionado: cada cambio de esquema (columna nueva, índice, tabla) sube `version`
+// y agrega una Migration explícita con addMigrations(...) (ver Migraciones.kt).
+// El JSON exportado en app/schemas permite compararlas.
+//   v1: Actividad 3 (local-first con MockAPI)
+//   v2: Actividad 4, columna user_id (aislamiento por usuario)
 @Database(
     entities = [ReminderEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -34,15 +35,12 @@ abstract class AppDatabase : RoomDatabase() {
                 instancia ?: crear(context.applicationContext).also { instancia = it }
             }
 
-        private fun crear(context: Context): AppDatabase {
-            val builder = Room.databaseBuilder(context, AppDatabase::class.java, NOMBRE)
-            // Solo en desarrollo: si falta una migración se borra y recrea la base
-            // en vez de crashear. En release, una migración faltante es un error
-            // que hay que corregir (nunca se borran datos del usuario en silencio).
-            if (BuildConfig.DEBUG) {
-                builder.fallbackToDestructiveMigration(dropAllTables = true)
-            }
-            return builder.build()
-        }
+        // Sin fallbackToDestructiveMigration (ni siquiera en debug): si falta una
+        // migración, Room falla al abrir la base en vez de borrar datos en silencio.
+        // Así una migración olvidada se detecta en desarrollo y no llega a producción.
+        private fun crear(context: Context): AppDatabase =
+            Room.databaseBuilder(context, AppDatabase::class.java, NOMBRE)
+                .addMigrations(MIGRACION_1_2)
+                .build()
     }
 }

@@ -33,7 +33,11 @@ class CierreSesion(
         return contarSinSincronizar()
     }
 
-    suspend fun contarSinSincronizar(): Int = dao.getPendingSync().size + dao.getFailed().size
+    // Solo cuenta las filas del usuario que está cerrando sesión
+    suspend fun contarSinSincronizar(): Int {
+        val uid = auth.currentUser.first()?.uid ?: return 0
+        return dao.getPendingSync(uid).size + dao.getFailed(uid).size
+    }
 
     suspend fun cerrarSesion() {
         detenerSincronizacion()

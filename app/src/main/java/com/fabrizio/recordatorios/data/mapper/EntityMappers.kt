@@ -28,9 +28,11 @@ fun SyncStatus.toEstadoSync(): EstadoSync = when (this) {
 }
 
 // Alta local: el clientId (UUID) se genera una sola vez y nunca cambia.
+// userId: dueño de la fila (uid de la sesión actual).
 // Queda PENDING_CREATE hasta que el servidor confirme.
-fun Recordatorio.toEntity(clientId: String, ahora: Long): ReminderEntity = ReminderEntity(
+fun Recordatorio.toEntity(clientId: String, userId: String, ahora: Long): ReminderEntity = ReminderEntity(
     clientId = clientId,
+    userId = userId,
     title = titulo,
     description = descripcion,
     category = categoria,
@@ -43,7 +45,8 @@ fun Recordatorio.toEntity(clientId: String, ahora: Long): ReminderEntity = Remin
 )
 
 // Edición local: se copian los datos editables y se CONSERVA la identidad
-// (id, clientId, remoteId, createdAt). Así nunca se crea un registro nuevo.
+// (id, clientId, userId, remoteId, createdAt). Así nunca se crea un registro nuevo
+// ni cambia de dueño.
 fun ReminderEntity.aplicarEdicion(editado: Recordatorio, ahora: Long): ReminderEntity = copy(
     title = editado.titulo,
     description = editado.descripcion,

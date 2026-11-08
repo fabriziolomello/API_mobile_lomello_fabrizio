@@ -24,6 +24,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.job
 import kotlinx.coroutines.joinAll
@@ -72,13 +73,15 @@ class AppContainer(context: Context) {
             conectividad = conectividad,
             appScope = syncScope,
             enTransaccion = { bloque -> database.withTransaction { bloque() } },
-            registrarSincronizacion = preferencias::guardarUltimaSincronizacion
+            registrarSincronizacion = preferencias::guardarUltimaSincronizacion,
+            // Cada vuelta de sync trabaja solo con las filas del usuario logueado
+            usuarioActual = { autenticacion.currentUser.first()?.uid }
         )
     }
 
     // Se expone como la interfaz: el resto de la app no conoce la implementación
     val repositorio: ReminderRepository by lazy {
-        LocalFirstReminderRepository(database.reminderDao(), syncManager, preferencias)
+        LocalFirstReminderRepository(database.reminderDao(), syncManager, preferencias, autenticacion)
     }
 
     // Actividad 4: autenticación. Se expone como la interfaz; FirebaseAuth se inicializa

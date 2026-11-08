@@ -10,6 +10,9 @@ sealed interface SyncResult {
     // Ya había una sincronización en curso: no se lanzó otra en paralelo
     data object EnCurso : SyncResult
 
+    // No hay usuario logueado: no se envía ni se baja nada (no hay a quién asignar las filas)
+    data object SinSesion : SyncResult
+
     // Falla recuperable (red, timeout, 5xx): los cambios siguen pendientes en Room
     data class Fallo(val error: DataResult.Error) : SyncResult
 }

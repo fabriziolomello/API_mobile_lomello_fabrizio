@@ -8,11 +8,15 @@ import com.fabrizio.recordatorios.model.Categoria
 import com.fabrizio.recordatorios.model.Prioridad
 
 // Tabla de recordatorios. Es la ÚNICA fuente de verdad que observa la UI.
+// Cada fila pertenece a un usuario (user_id = uid de Firebase Auth): todas las
+// consultas del DAO filtran por esa columna, así los datos quedan aislados por cuenta.
 @Entity(
     tableName = "reminders",
     indices = [
         // Único: impide que el mismo recordatorio quede dos veces en la base
         Index(value = ["client_id"], unique = true),
+        // Todas las consultas filtran por usuario
+        Index(value = ["user_id"]),
         Index(value = ["remote_id"]),
         Index(value = ["sync_status"])
     ]
@@ -27,7 +31,15 @@ data class ReminderEntity(
     @ColumnInfo(name = "client_id")
     val clientId: String,
 
-    // Id que asigna el servidor; null hasta que se confirma la creación
+    // Dueño del recordatorio (uid de Firebase Auth). Sin valor por defecto a propósito:
+    // ninguna fila se puede crear sin decir de quién es.
+    @ColumnInfo(name = "user_id")
+    val userId: String,
+
+    // Id que asigna MockAPI; null hasta que se confirma la creación.
+    // Solo lo usa la sincronización con MockAPI (PUT/DELETE reminders/{id}).
+    // Firestore va a usar client_id como id del documento, así que para ese remoto
+    // esta columna queda siempre null y se ignora.
     @ColumnInfo(name = "remote_id")
     val remoteId: String? = null,
 

@@ -24,19 +24,25 @@ import kotlinx.coroutines.flow.map
 
 private val PENDIENTES = setOf(SyncStatus.PENDING_CREATE, SyncStatus.PENDING_UPDATE, SyncStatus.PENDING_DELETE)
 
-// DAO en memoria que imita las consultas de ReminderDao (sin Room ni Android)
+// DAO en memoria que imita las consultas de ReminderDao (sin Room ni Android).
+// Igual que el real, toda consulta filtra por userId.
 class FakeReminderDao : ReminderDao {
     val filas = MutableStateFlow<List<ReminderEntity>>(emptyList())
     private var proximoId = 1L
 
-    private fun visibles() = filas.map { lista -> lista.filter { it.syncStatus != SyncStatus.PENDING_DELETE } }
-    private fun modificar(id: Long, cambio: (ReminderEntity) -> ReminderEntity?): Int {
+    private fun delUsuario(userId: String) = filas.value.filter { it.userId == userId }
+    private fun visibles(userId: String) =
+        filas.map { lista -> lista.filter { it.userId == userId && it.syncStatus != SyncStatus.PENDING_DELETE } }
+    private fun modificar(userId: String, id: Long, cambio: (ReminderEntity) -> ReminderEntity?): Int {
         var cambiadas = 0
-        filas.value = filas.value.mapNotNull { if (it.id == id) { cambiadas++; cambio(it) } else it }
+        filas.value = filas.value.mapNotNull {
+            if (it.id == id && it.userId == userId) { cambiadas++; cambio(it) } else it
+        }
         return cambiadas
     }
 
     override suspend fun insert(reminder: ReminderEntity): Long {
+        // client_id es único en toda la tabla (como el índice UNIQUE de Room)
         require(filas.value.none { it.clientId == reminder.clientId }) { "clientId duplicado" }
         val id = proximoId++
         filas.value = filas.value + reminder.copy(id = id)
@@ -44,59 +50,64 @@ class FakeReminderDao : ReminderDao {
     }
 
     override suspend fun update(reminder: ReminderEntity) {
-        modificar(reminder.id) { reminder }
+        filas.value = filas.value.map { if (it.id == reminder.id) reminder else it }
     }
 
-    override suspend fun delete(reminder: ReminderEntity) {
-        filas.value = filas.value.filterNot { it.id == reminder.id }
+    override suspend fun deleteById(userId: String, id: Long) = modificar(userId, id) { null }
+
+    override fun observeAll(userId: String): Flow<List<ReminderEntity>> = visibles(userId)
+    override fun observeById(userId: String, id: Long): Flow<ReminderEntity?> =
+        visibles(userId).map { l -> l.find { it.id == id } }
+    override fun observeByCompleted(userId: String, completed: Boolean) =
+        visibles(userId).map { l -> l.filter { it.isCompleted == completed } }
+    override fun observeByPriority(userId: String, priority: Prioridad) =
+        visibles(userId).map { l -> l.filter { it.priority == priority } }
+    override suspend fun getById(userId: String, id: Long) = delUsuario(userId).find { it.id == id }
+    override suspend fun getByClientId(userId: String, clientId: String) =
+        delUsuario(userId).find { it.clientId == clientId }
+    override suspend fun getByRemoteId(userId: String, remoteId: String) =
+        delUsuario(userId).find { it.remoteId == remoteId }
+    override suspend fun getPendingSync(userId: String) =
+        delUsuario(userId).filter { it.syncStatus in PENDIENTES }.sortedBy { it.updatedAt }
+    override suspend fun getFailed(userId: String) = delUsuario(userId).filter { it.syncStatus == SyncStatus.FAILED }
+    override suspend fun getWithRemoteId(userId: String) = delUsuario(userId).filter { it.remoteId != null }
+    override fun observePendingCount(userId: String) =
+        filas.map { l -> l.count { it.userId == userId && it.syncStatus in PENDIENTES } }
+
+    override suspend fun markSynced(userId: String, id: Long, remoteId: String, updatedAtEnviado: Long): Int {
+        if (getById(userId, id)?.updatedAt != updatedAtEnviado) return 0
+        return modificar(userId, id) { it.copy(remoteId = remoteId, syncStatus = SyncStatus.SYNCED) }
     }
 
-    override fun observeAll(): Flow<List<ReminderEntity>> = visibles()
-    override fun observeById(id: Long): Flow<ReminderEntity?> = visibles().map { l -> l.find { it.id == id } }
-    override fun observeByCompleted(completed: Boolean) = visibles().map { l -> l.filter { it.isCompleted == completed } }
-    override fun observeByPriority(priority: Prioridad) = visibles().map { l -> l.filter { it.priority == priority } }
-    override suspend fun getById(id: Long) = filas.value.find { it.id == id }
-    override suspend fun getByClientId(clientId: String) = filas.value.find { it.clientId == clientId }
-    override suspend fun getByRemoteId(remoteId: String) = filas.value.find { it.remoteId == remoteId }
-    override suspend fun getPendingSync() = filas.value.filter { it.syncStatus in PENDIENTES }.sortedBy { it.updatedAt }
-    override suspend fun getFailed() = filas.value.filter { it.syncStatus == SyncStatus.FAILED }
-    override suspend fun getWithRemoteId() = filas.value.filter { it.remoteId != null }
-    override fun observePendingCount() = filas.map { l -> l.count { it.syncStatus in PENDIENTES } }
-
-    override suspend fun markSynced(id: Long, remoteId: String, updatedAtEnviado: Long): Int {
-        if (getById(id)?.updatedAt != updatedAtEnviado) return 0
-        return modificar(id) { it.copy(remoteId = remoteId, syncStatus = SyncStatus.SYNCED) }
-    }
-
-    override suspend fun assignRemoteId(id: Long, remoteId: String) = modificar(id) {
+    override suspend fun assignRemoteId(userId: String, id: Long, remoteId: String) = modificar(userId, id) {
         it.copy(
             remoteId = remoteId,
             syncStatus = if (it.syncStatus == SyncStatus.PENDING_CREATE) SyncStatus.PENDING_UPDATE else it.syncStatus
         )
     }
 
-    override suspend fun markFailed(id: Long, updatedAtEnviado: Long): Int {
-        if (getById(id)?.updatedAt != updatedAtEnviado) return 0
-        return modificar(id) { it.copy(syncStatus = SyncStatus.FAILED) }
+    override suspend fun markFailed(userId: String, id: Long, updatedAtEnviado: Long): Int {
+        if (getById(userId, id)?.updatedAt != updatedAtEnviado) return 0
+        return modificar(userId, id) { it.copy(syncStatus = SyncStatus.FAILED) }
     }
 
-    override suspend fun resetToPendingCreate(id: Long) {
-        modificar(id) { it.copy(remoteId = null, syncStatus = SyncStatus.PENDING_CREATE) }
+    override suspend fun resetToPendingCreate(userId: String, id: Long) {
+        modificar(userId, id) { it.copy(remoteId = null, syncStatus = SyncStatus.PENDING_CREATE) }
     }
 
-    override suspend fun deleteIfPendingDelete(id: Long): Int {
-        if (getById(id)?.syncStatus != SyncStatus.PENDING_DELETE) return 0
-        return modificar(id) { null }
+    override suspend fun deleteIfPendingDelete(userId: String, id: Long): Int {
+        if (getById(userId, id)?.syncStatus != SyncStatus.PENDING_DELETE) return 0
+        return modificar(userId, id) { null }
     }
 
-    override suspend fun retryFailed(id: Long): Int {
-        if (getById(id)?.syncStatus != SyncStatus.FAILED) return 0
-        return modificar(id) {
+    override suspend fun retryFailed(userId: String, id: Long): Int {
+        if (getById(userId, id)?.syncStatus != SyncStatus.FAILED) return 0
+        return modificar(userId, id) {
             it.copy(syncStatus = if (it.remoteId == null) SyncStatus.PENDING_CREATE else SyncStatus.PENDING_UPDATE)
         }
     }
 
-    override suspend fun retryAllFailed(): Int = getFailed().sumOf { retryFailed(it.id) }
+    override suspend fun retryAllFailed(userId: String): Int = getFailed(userId).sumOf { retryFailed(userId, it.id) }
 }
 
 // Servidor falso en memoria, con fallas configurables

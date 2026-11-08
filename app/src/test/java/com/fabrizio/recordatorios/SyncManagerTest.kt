@@ -20,11 +20,15 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+private const val UID = "uid-ana"
+private const val OTRO_UID = "uid-beto"
+
 class SyncManagerTest {
 
     private val dao = FakeReminderDao()
     private val remoto = FakeRemoteDataSource()
     private val prefs = FakePreferenciasRepository()
+    private var usuario: String? = UID
     private val syncManager = SyncManager(
         dao = dao,
         remoto = remoto,
@@ -32,13 +36,19 @@ class SyncManagerTest {
         appScope = CoroutineScope(Dispatchers.Unconfined),
         enTransaccion = { it() },
         registrarSincronizacion = prefs::guardarUltimaSincronizacion,
+        usuarioActual = { usuario },
         reloj = { 5_000L }
     )
 
-    private suspend fun crearLocal(clientId: String = "uuid-1", status: SyncStatus = SyncStatus.PENDING_CREATE, remoteId: String? = null) =
+    private suspend fun crearLocal(
+        clientId: String = "uuid-1",
+        status: SyncStatus = SyncStatus.PENDING_CREATE,
+        remoteId: String? = null,
+        userId: String = UID
+    ) =
         dao.insert(
             ReminderEntity(
-                clientId = clientId, remoteId = remoteId, title = "Estudiar", category = Categoria.Estudio,
+                clientId = clientId, userId = userId, remoteId = remoteId, title = "Estudiar", category = Categoria.Estudio,
                 priority = Prioridad.Alta, createdAt = 1_000, updatedAt = 1_000, syncStatus = status
             )
         )
@@ -53,7 +63,7 @@ class SyncManagerTest {
         assertEquals(SyncResult.Exito(enviados = 1, recibidos = 0, rechazados = 0), resultado)
         assertEquals(1, remoto.posts)
         assertEquals(1, remoto.servidor.size)
-        val fila = dao.getById(id)!!
+        val fila = dao.getById(UID, id)!!
         assertEquals(SyncStatus.SYNCED, fila.syncStatus)
         assertEquals("1", fila.remoteId)
         assertEquals(1, dao.filas.value.size) // misma fila, sin duplicar
@@ -70,8 +80,8 @@ class SyncManagerTest {
 
         assertEquals(0, remoto.posts)
         assertEquals(1, remoto.servidor.size)
-        assertEquals("77", dao.getById(id)!!.remoteId)
-        assertEquals(SyncStatus.SYNCED, dao.getById(id)!!.syncStatus)
+        assertEquals("77", dao.getById(UID, id)!!.remoteId)
+        assertEquals(SyncStatus.SYNCED, dao.getById(UID, id)!!.syncStatus)
     }
 
     @Test
@@ -81,7 +91,7 @@ class SyncManagerTest {
 
         val primero = syncManager.sincronizar()
         assertEquals(SyncResult.Fallo(DataResult.Timeout), primero)
-        assertEquals(SyncStatus.PENDING_CREATE, dao.getById(id)!!.syncStatus) // sigue pendiente
+        assertEquals(SyncStatus.PENDING_CREATE, dao.getById(UID, id)!!.syncStatus) // sigue pendiente
 
         remoto.perderRespuestaDelPost = false
         syncManager.sincronizar() // reconexión / reintento
@@ -89,7 +99,7 @@ class SyncManagerTest {
         assertEquals(1, remoto.posts)
         assertEquals(1, remoto.servidor.size)
         assertEquals(1, dao.filas.value.size)
-        assertEquals(SyncStatus.SYNCED, dao.getById(id)!!.syncStatus)
+        assertEquals(SyncStatus.SYNCED, dao.getById(UID, id)!!.syncStatus)
     }
 
     @Test
@@ -100,7 +110,7 @@ class SyncManagerTest {
         val resultado = syncManager.sincronizar()
 
         assertEquals(SyncResult.Fallo(DataResult.ErrorServidor(500)), resultado)
-        assertEquals(SyncStatus.PENDING_CREATE, dao.getById(id)!!.syncStatus)
+        assertEquals(SyncStatus.PENDING_CREATE, dao.getById(UID, id)!!.syncStatus)
         assertTrue(syncManager.estado.value is EstadoSincronizacion.Error)
         assertNull(prefs.ultima.value)
     }
@@ -111,7 +121,7 @@ class SyncManagerTest {
         remoto.falla = DataResult.ErrorCliente(400)
 
         syncManager.sincronizar()
-        assertEquals(SyncStatus.FAILED, dao.getById(id)!!.syncStatus)
+        assertEquals(SyncStatus.FAILED, dao.getById(UID, id)!!.syncStatus)
 
         // FAILED no se reenvía solo
         remoto.falla = null
@@ -119,9 +129,9 @@ class SyncManagerTest {
         assertEquals(0, remoto.posts)
 
         // Reintento manual
-        dao.retryFailed(id)
+        dao.retryFailed(UID, id)
         syncManager.sincronizar()
-        assertEquals(SyncStatus.SYNCED, dao.getById(id)!!.syncStatus)
+        assertEquals(SyncStatus.SYNCED, dao.getById(UID, id)!!.syncStatus)
         assertEquals(1, remoto.posts)
     }
 
@@ -150,7 +160,7 @@ class SyncManagerTest {
         syncManager.sincronizar()
 
         assertTrue(remoto.servidor.isEmpty())
-        assertNull(dao.getById(id))
+        assertNull(dao.getById(UID, id))
     }
 
     @Test
@@ -163,12 +173,45 @@ class SyncManagerTest {
         syncManager.sincronizar()
 
         // El PUT envió la versión local y el pull no la pisó
-        assertEquals("Estudiar", dao.getById(idLocal)!!.title)
+        assertEquals("Estudiar", dao.getById(UID, idLocal)!!.title)
         assertEquals("Estudiar", remoto.servidor.first { it.id == "1" }.title)
         // El registro remoto nuevo se insertó una sola vez
-        val nuevo = dao.getByRemoteId("2")!!
+        val nuevo = dao.getByRemoteId(UID, "2")!!
         assertEquals(SyncStatus.SYNCED, nuevo.syncStatus)
         assertEquals(Categoria.Trabajo, nuevo.category)
         assertEquals(2, dao.filas.value.size)
+    }
+
+    // --- Aislamiento por usuario ---
+
+    @Test
+    fun sinSesionNoSeEnviaNiSeBajaNada() = runBlocking {
+        val id = crearLocal()
+        remoto.servidor += ReminderDto(id = "5", clientId = "uuid-5", title = "Remoto")
+        usuario = null
+
+        val resultado = syncManager.sincronizar()
+
+        assertEquals(SyncResult.SinSesion, resultado)
+        assertEquals(0, remoto.posts)
+        assertEquals(SyncStatus.PENDING_CREATE, dao.getById(UID, id)!!.syncStatus)
+        assertEquals(1, dao.filas.value.size)
+        assertNull(prefs.ultima.value)
+    }
+
+    @Test
+    fun soloSeEnvianLosPendientesDelUsuarioActualYElPullQuedaASuNombre() = runBlocking {
+        crearLocal(clientId = "uuid-ana")
+        val idBeto = crearLocal(clientId = "uuid-beto", userId = OTRO_UID)
+        remoto.servidor += ReminderDto(id = "50", clientId = "uuid-50", title = "Creado en otro dispositivo")
+
+        syncManager.sincronizar()
+
+        // Solo se envió el de Ana; el de Beto sigue pendiente y sin tocar
+        assertEquals(1, remoto.posts)
+        assertEquals(SyncStatus.PENDING_CREATE, dao.getById(OTRO_UID, idBeto)!!.syncStatus)
+        // Lo que bajó del servidor quedó a nombre de Ana
+        assertEquals(UID, dao.getByRemoteId(UID, "50")!!.userId)
+        assertNull(dao.getByRemoteId(OTRO_UID, "50"))
     }
 }

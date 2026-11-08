@@ -33,6 +33,7 @@ class CierreSesionTest {
         appScope = CoroutineScope(Dispatchers.Unconfined),
         enTransaccion = { it() },
         registrarSincronizacion = prefs::guardarUltimaSincronizacion,
+        usuarioActual = { auth.sesion.value?.uid },
         reloj = { 5_000L }
     )
 
@@ -50,7 +51,7 @@ class CierreSesionTest {
 
     private suspend fun crearPendiente(clientId: String) = dao.insert(
         ReminderEntity(
-            clientId = clientId, title = "Estudiar", category = Categoria.Estudio, priority = Prioridad.Alta,
+            clientId = clientId, userId = "uid-1", title = "Estudiar", category = Categoria.Estudio, priority = Prioridad.Alta,
             createdAt = 1_000, updatedAt = 1_000, syncStatus = SyncStatus.PENDING_CREATE
         )
     )
