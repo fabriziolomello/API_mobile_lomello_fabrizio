@@ -1,3 +1,48 @@
 <resources>
     <string name="app_name">Recordatorios</string>
+
+    <!-- Actividad 4: inicio (mientras se verifica la sesión) -->
+    <string name="inicio_verificando_sesion">Verificando sesión…</string>
+
+    <!-- Actividad 4: login y registro -->
+    <string name="auth_correo">Correo electrónico</string>
+    <string name="auth_contrasena">Contraseña</string>
+    <string name="auth_mostrar">Mostrar</string>
+    <string name="auth_ocultar">Ocultar</string>
+    <string name="auth_mostrar_contrasena">Mostrar contraseña</string>
+    <string name="auth_ocultar_contrasena">Ocultar contraseña</string>
+    <string name="auth_procesando">Procesando…</string>
+    <string name="auth_ayuda_contrasena">Al menos %1$d caracteres</string>
+    <string name="login_titulo">Ingresá a tu cuenta</string>
+    <string name="login_boton">Ingresar</string>
+    <string name="login_ir_a_registro">¿No tenés cuenta? Creá una</string>
+    <string name="registro_titulo">Creá tu cuenta</string>
+    <string name="registro_boton">Crear cuenta</string>
+    <string name="registro_ir_a_login">¿Ya tenés cuenta? Ingresá</string>
+
+    <!-- Actividad 4: errores de autenticación (uno por cada AuthError) -->
+    <string name="error_auth_correo_invalido">El correo no tiene un formato válido.</string>
+    <string name="error_auth_contrasena_debil">La contraseña debe tener al menos %1$d caracteres.</string>
+    <string name="error_auth_correo_registrado">Ya existe una cuenta con ese correo.</string>
+    <string name="error_auth_credenciales">Correo o contraseña incorrectos.</string>
+    <string name="error_auth_sin_red">Sin conexión. Revisá tu red e intentá de nuevo.</string>
+    <string name="error_auth_desconocido">Ocurrió un error inesperado. Intentá de nuevo.</string>
+
+    <!-- Actividad 4: cierre de sesión -->
+    <string name="cerrar_sesion">Cerrar sesión</string>
+    <string name="cancelar">Cancelar</string>
+    <string name="reintentar">Reintentar</string>
+    <string name="cerrar_sesion_confirmar_titulo">¿Cerrar sesión?</string>
+    <string name="cerrar_sesion_confirmar_texto">Antes de salir se van a sincronizar tus cambios pendientes. Después se borrarán los recordatorios guardados en este dispositivo.</string>
+    <string name="cerrar_sesion_sincronizando">Sincronizando cambios pendientes…</string>
+    <string name="cerrar_sesion_cerrando">Cerrando sesión…</string>
+    <string name="cerrar_sesion_pendientes_titulo">Hay cambios sin sincronizar</string>
+    <plurals name="cerrar_sesion_pendientes_texto">
+        <item quantity="one">Queda %1$d recordatorio sin sincronizar. Si cerrás sesión, se va a perder.</item>
+        <!-- "many" existe en las reglas de plural del español (por ejemplo, 1.000.000) -->
+        <item quantity="many">Quedan %1$d recordatorios sin sincronizar. Si cerrás sesión, se van a perder.</item>
+        <item quantity="other">Quedan %1$d recordatorios sin sincronizar. Si cerrás sesión, se van a perder.</item>
+    </plurals>
+    <string name="cerrar_sesion_igual">Cerrar sesión igual</string>
+    <string name="cerrar_sesion_error">No se pudo cerrar la sesión. Intentá de nuevo.</string>
 </resources>

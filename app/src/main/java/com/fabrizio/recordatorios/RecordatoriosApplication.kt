@@ -10,7 +10,8 @@ class RecordatoriosApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        // Sincroniza al abrir la app y cada vez que vuelve la conexión
-        container.syncManager.iniciar()
+        // Con sesión iniciada: sincroniza al abrir la app y cada vez que vuelve la conexión.
+        // Sin sesión no sincroniza (ver AppContainer.vincularSincronizacionASesion).
+        container.vincularSincronizacionASesion()
     }
 }

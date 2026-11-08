@@ -23,3 +23,17 @@ data class SincronizacionUi(
     // Último error (red, servidor o rechazo); se muestra en un Snackbar con "Reintentar"
     val error: EstadoSincronizacion.Error? = null
 )
+
+// Pasos del cierre de sesión (cada uno se muestra como un diálogo)
+sealed interface CierreSesionUi {
+    data object Inactivo : CierreSesionUi
+    // "¿Cerrar sesión?" con Cancelar / Cerrar sesión
+    data object Confirmando : CierreSesionUi
+    // Intentando subir lo pendiente antes de salir
+    data object Sincronizando : CierreSesionUi
+    // El sync no pudo subir todo: se avisa cuántos se perderían
+    data class AvisoPendientes(val cantidad: Int) : CierreSesionUi
+    // Borrando datos locales y cerrando la sesión
+    data object Cerrando : CierreSesionUi
+    data object Error : CierreSesionUi
+}

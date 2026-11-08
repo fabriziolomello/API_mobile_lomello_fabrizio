@@ -1,6 +1,19 @@
 package com.fabrizio.recordatorios.ui.listado
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import com.fabrizio.recordatorios.R
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -67,6 +80,7 @@ fun ListadoScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val sincronizacion by viewModel.sincronizacion.collectAsStateWithLifecycle()
     val fallaSimulada by viewModel.fallaSimulada.collectAsStateWithLifecycle()
+    val cierreSesion by viewModel.cierreSesionUi.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
     // Error de sincronización: Snackbar con "Reintentar". Los datos locales no se tocan.
@@ -89,6 +103,7 @@ fun ListadoScreen(
         onReintentar = viewModel::onReintentar,
         onSincronizar = viewModel::onSincronizar,
         onAbrirAjustes = onAbrirAjustes,
+        onCerrarSesion = viewModel::onCerrarSesionClick,
         snackbarHostState = snackbarHostState,
         modifier = modifier,
         menuDebug = {
@@ -100,6 +115,13 @@ fun ListadoScreen(
                 )
             }
         }
+    )
+
+    DialogosCierreSesion(
+        estado = cierreSesion,
+        onConfirmar = viewModel::onConfirmarCierreSesion,
+        onConfirmarConPendientes = viewModel::onConfirmarCierreConPendientes,
+        onCancelar = viewModel::onCancelarCierreSesion
     )
 }
 
@@ -114,6 +136,7 @@ fun ListadoContenido(
     onReintentar: () -> Unit,
     onSincronizar: () -> Unit,
     onAbrirAjustes: () -> Unit,
+    onCerrarSesion: () -> Unit,
     modifier: Modifier = Modifier,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     menuDebug: @Composable () -> Unit = {}
@@ -131,6 +154,12 @@ fun ListadoContenido(
                     }
                     IconButton(onClick = onAbrirAjustes) {
                         Icon(Icons.Filled.Settings, contentDescription = "Ajustes")
+                    }
+                    IconButton(onClick = onCerrarSesion) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ExitToApp,
+                            contentDescription = stringResource(R.string.cerrar_sesion)
+                        )
                     }
                     menuDebug()
                 }
@@ -233,6 +262,93 @@ private fun BarraSincronizacion(sincronizacion: SincronizacionUi) {
     }
 }
 
+// Un diálogo por paso del cierre de sesión. Mientras se sincroniza o se borra,
+// el diálogo no se puede descartar (onDismissRequest vacío) para no cortar el proceso.
+@Composable
+private fun DialogosCierreSesion(
+    estado: CierreSesionUi,
+    onConfirmar: () -> Unit,
+    onConfirmarConPendientes: () -> Unit,
+    onCancelar: () -> Unit
+) {
+    when (estado) {
+        CierreSesionUi.Inactivo -> Unit
+
+        CierreSesionUi.Confirmando -> AlertDialog(
+            onDismissRequest = onCancelar,
+            title = { Text(stringResource(R.string.cerrar_sesion_confirmar_titulo)) },
+            text = { Text(stringResource(R.string.cerrar_sesion_confirmar_texto)) },
+            confirmButton = {
+                TextButton(onClick = onConfirmar) { Text(stringResource(R.string.cerrar_sesion)) }
+            },
+            dismissButton = {
+                TextButton(onClick = onCancelar) { Text(stringResource(R.string.cancelar)) }
+            }
+        )
+
+        CierreSesionUi.Sincronizando -> DialogoProgreso(stringResource(R.string.cerrar_sesion_sincronizando))
+
+        is CierreSesionUi.AvisoPendientes -> AlertDialog(
+            onDismissRequest = onCancelar,
+            icon = { Icon(Icons.Filled.Warning, contentDescription = null) },
+            title = { Text(stringResource(R.string.cerrar_sesion_pendientes_titulo)) },
+            text = {
+                Text(
+                    pluralStringResource(
+                        R.plurals.cerrar_sesion_pendientes_texto,
+                        estado.cantidad,
+                        estado.cantidad
+                    )
+                )
+            },
+            confirmButton = {
+                // Acción destructiva: en color de error
+                TextButton(onClick = onConfirmarConPendientes) {
+                    Text(
+                        stringResource(R.string.cerrar_sesion_igual),
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onCancelar) { Text(stringResource(R.string.cancelar)) }
+            }
+        )
+
+        CierreSesionUi.Cerrando -> DialogoProgreso(stringResource(R.string.cerrar_sesion_cerrando))
+
+        CierreSesionUi.Error -> AlertDialog(
+            onDismissRequest = onCancelar,
+            title = { Text(stringResource(R.string.cerrar_sesion)) },
+            text = { Text(stringResource(R.string.cerrar_sesion_error)) },
+            confirmButton = {
+                TextButton(onClick = onConfirmar) { Text(stringResource(R.string.reintentar)) }
+            },
+            dismissButton = {
+                TextButton(onClick = onCancelar) { Text(stringResource(R.string.cancelar)) }
+            }
+        )
+    }
+}
+
+@Composable
+private fun DialogoProgreso(mensaje: String) {
+    AlertDialog(
+        onDismissRequest = {},
+        confirmButton = {},
+        text = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }
+            ) {
+                CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                Spacer(modifier = Modifier.width(16.dp))
+                Text(mensaje)
+            }
+        }
+    )
+}
+
 // SOLO DEBUG: fuerza fallas de red para probar 4xx, 5xx, timeout y sin conexión
 @Composable
 private fun MenuSimuladorFallas(
@@ -275,7 +391,8 @@ private fun ListadoDatosPreview() {
             onRecordatorioClick = {},
             onReintentar = {},
             onSincronizar = {},
-            onAbrirAjustes = {}
+            onAbrirAjustes = {},
+            onCerrarSesion = {}
         )
     }
 }
@@ -291,7 +408,8 @@ private fun ListadoSinConexionPreview() {
             onRecordatorioClick = {},
             onReintentar = {},
             onSincronizar = {},
-            onAbrirAjustes = {}
+            onAbrirAjustes = {},
+            onCerrarSesion = {}
         )
     }
 }

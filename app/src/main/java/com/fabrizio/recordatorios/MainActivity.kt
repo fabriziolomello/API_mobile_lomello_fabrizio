@@ -24,6 +24,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             val tema by mainViewModel.tema.collectAsStateWithLifecycle()
+            val sesion by mainViewModel.sesion.collectAsStateWithLifecycle()
 
             // Mientras se lee DataStore (milisegundos) no se dibuja nada,
             // así no aparece un tema y enseguida el otro.
@@ -45,7 +46,7 @@ class MainActivity : ComponentActivity() {
 
                 RecordatoriosTheme(darkTheme = oscuro) {
                     // Cada pantalla tiene su propio Scaffold y aplica su innerPadding
-                    RecordatoriosApp()
+                    RecordatoriosApp(sesion = sesion)
                 }
             }
         }

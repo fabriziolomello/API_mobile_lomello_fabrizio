@@ -8,6 +8,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.fabrizio.recordatorios.RecordatoriosApplication
 import com.fabrizio.recordatorios.data.ReminderRepository
+import com.fabrizio.recordatorios.data.auth.CierreSesion
 import com.fabrizio.recordatorios.data.preferencias.PreferenciasRepository
 import com.fabrizio.recordatorios.data.preferencias.PreferenciasUsuario
 import com.fabrizio.recordatorios.data.remote.FallaSimulada
@@ -16,10 +17,12 @@ import com.fabrizio.recordatorios.data.sync.ConnectivityObserver
 import com.fabrizio.recordatorios.data.sync.EstadoSincronizacion
 import com.fabrizio.recordatorios.model.FormatoFecha
 import com.fabrizio.recordatorios.model.Recordatorio
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
@@ -31,7 +34,8 @@ class ListadoViewModel(
     private val repositorio: ReminderRepository,
     private val preferencias: PreferenciasRepository,
     conectividad: ConnectivityObserver,
-    private val simuladorFallas: SimuladorFallas
+    private val simuladorFallas: SimuladorFallas,
+    private val cierreSesion: CierreSesion
 ) : ViewModel() {
 
     // Cada reintento incrementa el contador y vuelve a suscribirse a Room
@@ -92,6 +96,63 @@ class ListadoViewModel(
 
     fun onFallaSimuladaSeleccionada(falla: FallaSimulada) = simuladorFallas.cambiarFalla(falla)
 
+    // --- Cierre de sesión ---
+    // Al terminar NO se navega desde acá: logout() cambia el Flow de sesión y
+    // la navegación vuelve sola al login con el historial limpio.
+
+    private val _cierreSesion = MutableStateFlow<CierreSesionUi>(CierreSesionUi.Inactivo)
+    val cierreSesionUi: StateFlow<CierreSesionUi> = _cierreSesion.asStateFlow()
+
+    fun onCerrarSesionClick() {
+        if (_cierreSesion.value == CierreSesionUi.Inactivo) _cierreSesion.value = CierreSesionUi.Confirmando
+    }
+
+    fun onCancelarCierreSesion() {
+        // Mientras se sincroniza o se borra no se puede cancelar (los diálogos no lo ofrecen)
+        val estado = _cierreSesion.value
+        if (estado != CierreSesionUi.Sincronizando && estado != CierreSesionUi.Cerrando) {
+            _cierreSesion.value = CierreSesionUi.Inactivo
+        }
+    }
+
+    // Paso 1: intenta subir lo pendiente. Si queda algo sin subir, pregunta de nuevo.
+    fun onConfirmarCierreSesion() {
+        _cierreSesion.value = CierreSesionUi.Sincronizando
+        viewModelScope.launch {
+            val sinSincronizar = try {
+                cierreSesion.sincronizarAntesDeSalir()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Si falla el conteo, se avisa igual en vez de borrar a ciegas
+                _cierreSesion.value = CierreSesionUi.Error
+                return@launch
+            }
+            if (sinSincronizar > 0) {
+                _cierreSesion.value = CierreSesionUi.AvisoPendientes(sinSincronizar)
+            } else {
+                cerrarSesion()
+            }
+        }
+    }
+
+    // Paso 2 (con pendientes): el usuario acepta perderlos
+    fun onConfirmarCierreConPendientes() {
+        viewModelScope.launch { cerrarSesion() }
+    }
+
+    private suspend fun cerrarSesion() {
+        _cierreSesion.value = CierreSesionUi.Cerrando
+        try {
+            cierreSesion.cerrarSesion()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // La limpieza falló antes del logout: la sesión sigue abierta y se puede reintentar
+            _cierreSesion.value = CierreSesionUi.Error
+        }
+    }
+
     // --- Lógica interna ---
 
     private fun construirEstado(
@@ -112,7 +173,8 @@ class ListadoViewModel(
                     repositorio = app.container.repositorio,
                     preferencias = app.container.preferencias,
                     conectividad = app.container.conectividad,
-                    simuladorFallas = app.container.simuladorFallas
+                    simuladorFallas = app.container.simuladorFallas,
+                    cierreSesion = app.container.cierreSesion
                 )
             }
         }

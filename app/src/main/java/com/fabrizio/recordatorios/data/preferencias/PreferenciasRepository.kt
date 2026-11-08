@@ -31,6 +31,10 @@ interface PreferenciasRepository {
     val ultimaSincronizacion: Flow<Long?>
     suspend fun guardarUltimaSincronizacion(momento: Long)
 
+    // Al cerrar sesión: borra lo ligado al usuario (último sync y filtros del listado).
+    // El tema se conserva: es una preferencia del dispositivo.
+    suspend fun borrarDatosDeSesion()
+
     // Solo para pruebas (builds de debug): guarda un tema inexistente para
     // demostrar que la lectura vuelve al valor por defecto sin romper la app.
     suspend fun guardarTemaInvalidoParaPrueba()
@@ -66,6 +70,15 @@ class PreferenciasRepositoryDataStore(
 
     override suspend fun guardarUltimaSincronizacion(momento: Long) {
         dataStore.edit { it[Claves.ULTIMA_SINCRONIZACION] = momento }
+    }
+
+    override suspend fun borrarDatosDeSesion() {
+        dataStore.edit {
+            it.remove(Claves.ULTIMA_SINCRONIZACION)
+            it.remove(Claves.MOSTRAR_COMPLETADOS)
+            it.remove(Claves.ORDEN)
+            it.remove(Claves.FILTRO_PRIORIDAD)
+        }
     }
 
     override suspend fun guardarTema(tema: TemaApp) {

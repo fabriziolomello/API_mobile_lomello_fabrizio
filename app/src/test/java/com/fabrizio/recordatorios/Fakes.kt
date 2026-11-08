@@ -155,6 +155,12 @@ class FakePreferenciasRepository : PreferenciasRepository {
     override val preferencias: Flow<PreferenciasUsuario> = flowOf(PreferenciasUsuario())
     override val ultimaSincronizacion: Flow<Long?> = ultima
     override suspend fun guardarUltimaSincronizacion(momento: Long) { ultima.value = momento }
+    var datosDeSesionBorrados = false
+        private set
+    override suspend fun borrarDatosDeSesion() {
+        ultima.value = null
+        datosDeSesionBorrados = true
+    }
     override suspend fun guardarTema(tema: TemaApp) = Unit
     override suspend fun guardarMostrarCompletados(mostrar: Boolean) = Unit
     override suspend fun guardarOrden(orden: CriterioOrden) = Unit
@@ -185,5 +191,10 @@ class FakeAuthRepository(usuarioInicial: AuthUser? = null) : AuthRepository {
 
     override suspend fun register(email: String, password: String) = autenticar(email)
     override suspend fun login(email: String, password: String) = autenticar(email)
-    override fun logout() { sesion.value = null }
+    // Permite verificar en qué momento se llamó a logout()
+    var alCerrarSesion: () -> Unit = {}
+    override fun logout() {
+        alCerrarSesion()
+        sesion.value = null
+    }
 }
