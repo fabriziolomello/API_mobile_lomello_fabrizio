@@ -23,6 +23,29 @@ val apiBaseUrl: String = (propiedadesLocales.getProperty("API_BASE_URL") ?: "htt
     .trim()
     .let { if (it.endsWith("/")) it else "$it/" } // Retrofit exige la barra final
 
+// Firma del release: keystore.properties en la raíz del proyecto (NO se sube a git, igual
+// que el .jks). Claves esperadas: storeFile, storePassword, keyAlias, keyPassword.
+// storeFile puede ser absoluto o relativo a la raíz del proyecto.
+// Nunca se imprimen valores: los errores solo nombran las claves que faltan.
+val propiedadesKeystore = Properties().apply {
+    val archivo = providers.fileContents(rootProject.layout.projectDirectory.file("keystore.properties"))
+    archivo.asText.orNull?.let { load(it.reader()) }
+}
+val archivoKeystoreRelease: File? = propiedadesKeystore.getProperty("storeFile")
+    ?.takeIf { it.isNotBlank() }
+    ?.let { rootProject.file(it.trim()) }
+// null = se puede firmar; si no, el motivo (sin datos sensibles)
+val problemaFirmaRelease: String? = run {
+    val claves = listOf("storeFile", "storePassword", "keyAlias", "keyPassword")
+    val faltantes = claves.filter { propiedadesKeystore.getProperty(it).isNullOrBlank() }
+    when {
+        propiedadesKeystore.isEmpty -> "no se encontró keystore.properties en la raíz del proyecto"
+        faltantes.isNotEmpty() -> "a keystore.properties le faltan las claves: ${faltantes.joinToString()}"
+        archivoKeystoreRelease?.isFile != true -> "no existe el archivo indicado en storeFile de keystore.properties"
+        else -> null
+    }
+}
+
 android {
     namespace = "com.fabrizio.recordatorios"
     compileSdk {
@@ -41,12 +64,29 @@ android {
         buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
     }
 
+    signingConfigs {
+        // Solo se crea si keystore.properties está completo y el .jks existe.
+        // Sin eso, debug y los tests siguen funcionando; el release falla (ver verificarFirmaRelease).
+        if (problemaFirmaRelease == null) {
+            create("release") {
+                storeFile = archivoKeystoreRelease
+                storePassword = propiedadesKeystore.getProperty("storePassword")
+                keyAlias = propiedadesKeystore.getProperty("keyAlias")
+                keyPassword = propiedadesKeystore.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            // AGP 9: optimization.enable activa R8 (código: shrink + optimización + ofuscación)
+            // y la reducción de recursos; reemplaza a isMinifyEnabled / isShrinkResources.
+            // packageScope queda en su valor por defecto ("**"): se optimiza todo, incluido el
+            // código de la app. Las reglas keep propias están en src/main/keepRules/rules.keep.
             optimization {
                 enable = true
-                packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
             }
+            signingConfig = signingConfigs.findByName("release")
         }
     }
     compileOptions {
@@ -58,6 +98,25 @@ android {
         // BuildConfig.DEBUG (herramientas solo de debug) y BuildConfig.API_BASE_URL
         buildConfig = true
     }
+}
+
+// Sin firma válida, el release NO se genera (ni sin firmar): falla con un mensaje claro.
+// Solo depende de esta tarea el empaquetado/firma del release; debug y tests no la ven.
+val verificarFirmaRelease = tasks.register("verificarFirmaRelease") {
+    group = "verification"
+    description = "Verifica que keystore.properties permita firmar el release"
+    val problema = problemaFirmaRelease // solo un String: compatible con configuration cache
+    doLast {
+        if (problema != null) {
+            throw GradleException(
+                "No se puede firmar el release: $problema. " +
+                    "Creá keystore.properties en la raíz (storeFile, storePassword, keyAlias, keyPassword)."
+            )
+        }
+    }
+}
+tasks.matching { it.name == "packageRelease" || it.name == "signReleaseBundle" }.configureEach {
+    dependsOn(verificarFirmaRelease)
 }
 
 // exportSchema = true: Room escribe el esquema de cada versión de la base en JSON.

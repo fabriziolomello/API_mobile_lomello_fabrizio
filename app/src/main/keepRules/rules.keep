@@ -1,12 +1,17 @@
-# Add project specific R8 rules here.
-# AGP will combine all keep rule files in src/main/keepRules to pass to R8
+# Reglas R8 propias de la app. AGP junta todos los archivos de src/main/keepRules
+# con las reglas por defecto (proguard-android-optimize) y las de consumidor de cada
+# librería (Room, Firebase, DataStore, OkHttp, Retrofit, kotlinx.serialization...).
+# Ver https://d.android.com/r/tools/r8/keep-rules
 #
-# For more details, see
-#   https://d.android.com/r/tools/r8/keep-rules
+# No hacen falta -keep de clases de la app:
+#  - Room: AppDatabase_Impl y los DAO los genera KSP; las reglas de consumidor de
+#    room-runtime conservan el constructor que Room busca por reflexión.
+#  - Firestore: el mapeo Map <-> CloudReminder es manual (data/cloud/CloudMappers.kt,
+#    sin toObject()); los nombres de los campos son constantes String, no nombres de clase.
+#  - Enums guardados en Room/DataStore: se leen por .name / entries, que R8 conserva.
+#  - ViewModels: se crean con viewModelFactory { initializer { ... } }, sin reflexión.
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# Stack traces legibles en los reportes de errores del release: conserva números de línea
+# (se des-ofuscan con el mapping.txt de cada versión) y oculta el nombre real del archivo.
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile
