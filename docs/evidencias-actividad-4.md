@@ -1,7 +1,7 @@
 # Evidencias de la Actividad 4
 
 Documentación de pruebas de la app Recordatorios con Firebase Auth y Cloud Firestore.
-Este documento no incluye capturas de pantalla. Cada resultado indica de dónde sale:
+Cada resultado indica de dónde sale:
 
 - **Verificado**: lo probé a mano en el emulador (con el release, o en los pasos 3, 4 y 5-previo).
 - **Por código**: es lo que hace el código; no se observó por separado en una prueba manual.
