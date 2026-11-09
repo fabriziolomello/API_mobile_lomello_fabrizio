@@ -10,10 +10,13 @@ import com.fabrizio.recordatorios.data.auth.AuthRepository
 import com.fabrizio.recordatorios.data.preferencias.PreferenciasRepository
 import com.fabrizio.recordatorios.data.preferencias.TemaApp
 import com.fabrizio.recordatorios.ui.auth.EstadoSesion
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 // ViewModel de la Activity: expone el tema elegido y el estado de la sesión (para la navegación)
 class MainViewModel(
@@ -30,10 +33,30 @@ class MainViewModel(
             initialValue = null
         )
 
+    // true cuando terminó la verificación de la sesión guardada contra el servidor
+    private val sesionRevalidada = MutableStateFlow(false)
+
+    init {
+        viewModelScope.launch {
+            try {
+                autenticacion.revalidarSesion()
+            } finally {
+                sesionRevalidada.value = true
+            }
+        }
+    }
+
     // La navegación reacciona a este Flow: emite en cada inicio o cierre de sesión,
     // incluso si la sesión se invalida desde afuera (cuenta deshabilitada, token revocado).
-    val sesion: StateFlow<EstadoSesion> = autenticacion.currentUser
-        .map { usuario -> usuario?.let { EstadoSesion.Autenticado(it.uid) } ?: EstadoSesion.SinSesion }
+    // Mientras se revalida sigue en Verificando (splash): así una cuenta deshabilitada no
+    // llega a ver el listado, y no parpadea el login si la cuenta es válida.
+    val sesion: StateFlow<EstadoSesion> = combine(sesionRevalidada, autenticacion.currentUser) { revalidada, usuario ->
+        when {
+            !revalidada -> EstadoSesion.Verificando
+            usuario != null -> EstadoSesion.Autenticado(usuario.uid)
+            else -> EstadoSesion.SinSesion
+        }
+    }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),

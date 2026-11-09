@@ -15,4 +15,8 @@ interface AuthRepository {
     suspend fun login(email: String, password: String): Result<AuthUser>
 
     fun logout()
+
+    // Si hay una sesión guardada, la verifica contra el servidor y la cierra si la cuenta
+    // ya no es válida. Nunca lanza errores (salvo cancelación): sin red, la sesión sigue.
+    suspend fun revalidarSesion()
 }

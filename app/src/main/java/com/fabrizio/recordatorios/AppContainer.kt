@@ -20,13 +20,12 @@ import com.fabrizio.recordatorios.data.remote.SimuladorFallas
 import com.fabrizio.recordatorios.data.sync.AndroidConnectivityObserver
 import com.fabrizio.recordatorios.data.sync.ConnectivityObserver
 import com.fabrizio.recordatorios.data.sync.SyncManager
+import com.fabrizio.recordatorios.data.sync.seguirLaSesion
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.job
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
@@ -81,7 +80,8 @@ class AppContainer(context: Context) {
             registrarSincronizacion = preferencias::guardarUltimaSincronizacion,
             // El sync trabaja solo con las filas del usuario logueado
             usuarioActual = { autenticacion.currentUser.first()?.uid },
-            log = { mensaje -> Log.w("SyncManager", mensaje) }
+            log = { mensaje -> Log.w("SyncManager", mensaje) },
+            alSesionInvalida = { autenticacion.logout() }
         )
     }
 
@@ -107,13 +107,17 @@ class AppContainer(context: Context) {
     }
 
     // La sincronización sigue a la sesión: con usuario escucha la reconexión y sincroniza;
-    // sin usuario se detiene (así no se bajan datos a Room mientras no hay nadie logueado).
+    // sin usuario detiene el sync y borra los datos locales (Room + DataStore de sesión).
+    // Cubre cualquier forma de perder la sesión: logout manual (ya limpió: repetirlo no hace
+    // nada), cuenta deshabilitada o borrada, token inválido o UNAUTHENTICATED de Firestore.
     fun vincularSincronizacionASesion() {
         appScope.launch {
-            autenticacion.currentUser
-                .map { usuario -> usuario != null }
-                .distinctUntilChanged()
-                .collect { conSesion -> if (conSesion) syncManager.iniciar() else detenerSincronizacion() }
+            seguirLaSesion(
+                usuario = autenticacion.currentUser,
+                alIniciarSesion = syncManager::iniciar,
+                alPerderSesion = cierreSesion::limpiarDatosLocales,
+                alFallarLimpieza = { e -> Log.w("Sesion", "No se pudieron borrar los datos locales", e) }
+            )
         }
     }
 

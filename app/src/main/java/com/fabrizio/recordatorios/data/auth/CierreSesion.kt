@@ -40,13 +40,20 @@ class CierreSesion(
     }
 
     suspend fun cerrarSesion() {
+        limpiarDatosLocales()
+        auth.logout()
+    }
+
+    // Detiene el sync y borra Room y los datos de sesión de DataStore. Es idempotente
+    // (borrar una base vacía no falla): la usa el logout manual y también AppContainer
+    // cuando la sesión se pierde por otro motivo (cuenta deshabilitada, token inválido).
+    suspend fun limpiarDatosLocales() {
         detenerSincronizacion()
         // Un sync manual lanzado desde un ViewModel no vive en el scope de sync:
         // se espera a que termine para que no escriba en Room después de borrarla.
         esperarSyncEnCurso()
         borrarBaseLocal()
         preferencias.borrarDatosDeSesion()
-        auth.logout()
     }
 
     private suspend fun esperarSyncEnCurso() {

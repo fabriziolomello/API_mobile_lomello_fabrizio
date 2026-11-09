@@ -220,4 +220,10 @@ class FakeAuthRepository(usuarioInicial: AuthUser? = null) : AuthRepository {
         alCerrarSesion()
         sesion.value = null
     }
+
+    // Si no es null, revalidarSesion queda esperando hasta que se complete (simula el reload)
+    var bloqueoRevalidacion: CompletableDeferred<Unit>? = null
+    override suspend fun revalidarSesion() {
+        bloqueoRevalidacion?.await()
+    }
 }

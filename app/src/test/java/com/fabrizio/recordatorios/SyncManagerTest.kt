@@ -40,6 +40,7 @@ class SyncManagerTest {
     private var usuario: String? = ANA
     private var ahora = 5_000L
     private val avisos = mutableListOf<String>()
+    private var cierresDeSesion = 0
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
 
     private val syncManager = SyncManager(
@@ -51,7 +52,8 @@ class SyncManagerTest {
         registrarSincronizacion = prefs::guardarUltimaSincronizacion,
         usuarioActual = { usuario },
         reloj = { ahora },
-        log = { avisos += it }
+        log = { avisos += it },
+        alSesionInvalida = { cierresDeSesion++ }
     )
 
     // Repositorio real sobre el mismo DAO (para crear/editar/borrar como lo hace la app)
@@ -429,5 +431,40 @@ class SyncManagerTest {
         primero.await()
         assertEquals(1, nube.documentos(ANA).size)
         assertEquals(SyncStatus.SYNCED, fila("c1")!!.syncStatus)
+    }
+
+    @Test
+    fun noAutenticadoEnElPushCierraLaSesion() = runBlocking {
+        crearLocal("c1")
+        nube.fallaPorClientId["c1"] = CloudException.NoAutenticado()
+
+        val resultado = syncManager.sincronizar()
+
+        assertTrue(resultado is SyncResult.Fallo)
+        assertEquals(1, cierresDeSesion)
+        assertEquals(SyncStatus.PENDING_CREATE, fila("c1")!!.syncStatus) // la fila no es culpable
+    }
+
+    @Test
+    fun noAutenticadoEnElPullCierraLaSesion() = runBlocking {
+        nube.fallaFetch = CloudException.NoAutenticado()
+
+        syncManager.sincronizar()
+
+        assertEquals(1, cierresDeSesion)
+    }
+
+    @Test
+    fun permissionDeniedNoCierraLaSesion() = runBlocking {
+        crearLocal("c1")
+        nube.fallaPorClientId["c1"] = CloudException.PermissionDenied()
+        syncManager.sincronizar()
+
+        nube.fallaPorClientId.clear()
+        nube.fallaFetch = CloudException.PermissionDenied()
+        syncManager.sincronizar()
+
+        assertEquals(0, cierresDeSesion)
+        assertEquals(SyncStatus.FAILED, fila("c1")!!.syncStatus)
     }
 }

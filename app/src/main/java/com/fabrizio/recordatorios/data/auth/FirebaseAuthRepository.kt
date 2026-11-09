@@ -37,6 +37,11 @@ class FirebaseAuthRepository(
         auth.signOut()
     }
 
+    override suspend fun revalidarSesion() {
+        val usuario = auth.currentUser ?: return
+        revalidarSesion(recargar = { usuario.reload().await() }, cerrarSesion = ::logout)
+    }
+
     // Ejecuta la operación y traduce cualquier falla a AuthError
     private suspend fun autenticar(operacion: suspend () -> AuthResult): Result<AuthUser> =
         try {

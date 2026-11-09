@@ -50,7 +50,10 @@ class SyncManager(
     private val usuarioActual: suspend () -> String?,
     private val reloj: () -> Long = System::currentTimeMillis,
     // Avisos de diagnóstico (en la app, Log.w; en los tests se capturan o se ignoran)
-    private val log: (String) -> Unit = {}
+    private val log: (String) -> Unit = {},
+    // Firestore respondió UNAUTHENTICATED: la sesión ya no sirve. En la app cierra la sesión,
+    // y eso dispara la limpieza de datos locales (ver AppContainer.vincularSincronizacionASesion).
+    private val alSesionInvalida: () -> Unit = {}
 ) {
 
     // Single-flight: un solo sync a la vez. tryLock no espera: si ya hay uno
@@ -84,6 +87,17 @@ class SyncManager(
     }
 
     suspend fun sincronizar(): SyncResult {
+        val resultado = sincronizarConLock()
+        // Se avisa DESPUÉS de soltar el Mutex y de salir de Sincronizando: el cierre de
+        // sesión cancela y espera al sync, así que llamarlo desde adentro lo trabaría.
+        if (resultado is SyncResult.Fallo && resultado.error is CloudException.NoAutenticado) {
+            log("Firestore rechazó la sesión (UNAUTHENTICATED): se cierra la sesión")
+            alSesionInvalida()
+        }
+        return resultado
+    }
+
+    private suspend fun sincronizarConLock(): SyncResult {
         if (!mutex.tryLock()) {
             otraVuelta.set(true)
             return SyncResult.EnCurso
